@@ -399,10 +399,7 @@ function sInput = Run(sProcess, sInput) %#ok<DEFNU>
     sInput = eeglab2brainstorm(EEGclean, sInputFiltered);
     sInput.A = sOutput.A;  % Use the full channel data with cleaned EEG
     
-    % Update Comment logic
-    % Force DataType to 'recordings' (imported data) to ensure it stays in the same study
-    sInput.DataType = 'recordings';
-    
+    % Update Comment logic   
     new_duration = sInput.TimeVector(end) - sInput.TimeVector(1);
     
     % Get the base comment
