@@ -123,7 +123,7 @@ elseif strcmpi(signal_type, 'meg')
         all_evals_refCOV = eig(refCOV_reg);
         all_evals_refCOV = sort(all_evals_refCOV, 'descend');
         cumvar_refCOV = cumsum(all_evals_refCOV) / sum(all_evals_refCOV);
-        refCOV_top_PCs = find(cumvar_refCOV >= 0.80, 1, 'first');
+        refCOV_top_PCs = find(cumvar_refCOV >= 0.85, 1, 'first');
         refCOV_top_PCs = max(1, min(refCOV_top_PCs, N_EEG_electrodes - 1));
         % fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
 
