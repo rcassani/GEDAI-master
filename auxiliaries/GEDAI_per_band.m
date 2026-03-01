@@ -11,7 +11,7 @@
 % For any questions, please contact:
 % dr.t.ros@gmail.com
 
-function [cleaned_data, artifacts_data, SENSAI_score, artifact_threshold_out, ENOVA] = GEDAI_per_band(eeg_data, srate, chanlocs, artifact_threshold_type, epoch_size, refCOV, optimization_type, parallel, signal_type, minThreshold)
+function [cleaned_data, artifacts_data, SENSAI_score, artifact_threshold_out, ENOVA] = GEDAI_per_band(eeg_data, srate, chanlocs, artifact_threshold_type, epoch_size, refCOV, optimization_type, parallel, signal_type, minThreshold, maxThreshold)
 
 if isempty(eeg_data)
     error('Cannot process empty data');
@@ -37,6 +37,11 @@ end
 % Default minThreshold if not provided
 if nargin < 10 || isempty(minThreshold)
     minThreshold = 0;
+end
+
+% Default maxThreshold if not provided
+if nargin < 11 || isempty(maxThreshold)
+    maxThreshold = 12;
 end
 
 %% Pad and Epoch Data
@@ -128,7 +133,7 @@ elseif strcmpi(signal_type, 'meg')
         % fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
 
     % Top PCs for SSI (separate from refCOV top PCs)
-        SSI_top_PCs = 4;
+        SSI_top_PCs = 3;
     % disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
 end
 
@@ -140,8 +145,6 @@ end
     [~, sidxS_Template_cov] = sort(diag(evals_Template_cov), 'descend');
     evecs_Template_cov = evecs_Template_cov(:, sidxS_Template_cov);
 
-
-maxThreshold = 12;
 
 % --- Optimization Method Switch ---
 switch optimization_type
