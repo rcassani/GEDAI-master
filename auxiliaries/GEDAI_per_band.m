@@ -133,7 +133,7 @@ elseif strcmpi(signal_type, 'meg')
         fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
 
     % Top PCs for SSI (separate from refCOV top PCs)
-        SSI_top_PCs = 3;
+        SSI_top_PCs = 4;
     disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
 end
 
