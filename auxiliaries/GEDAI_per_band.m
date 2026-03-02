@@ -132,6 +132,10 @@ elseif strcmpi(signal_type, 'meg')
     % disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
 end
 
+if refCOV_top_PCs < SSI_top_PCs
+    warning('GEDAI:LowRefCOVPCs', 'refCOV variance appears to be concentrated in too few principal components. Verify that leadfield matrix is well constructed.');
+end
+
 
 % Apply refCOV_top_PCs
     % Use eigs for truncated decomposition (efficiency optimization)
