@@ -118,8 +118,8 @@ if strcmpi(signal_type, 'eeg')
    refCOV_top_PCs = 3;
    SSI_top_PCs = 3;
 
-    % disp(['EEG  refCOV PCs: ' num2str(refCOV_top_PCs)]);
-    % disp(['EEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
+    disp(['EEG  refCOV PCs: ' num2str(refCOV_top_PCs)]);
+    disp(['EEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
 
 elseif strcmpi(signal_type, 'meg')
 
@@ -130,13 +130,16 @@ elseif strcmpi(signal_type, 'meg')
         cumvar_refCOV = cumsum(all_evals_refCOV) / sum(all_evals_refCOV);
         refCOV_top_PCs = find(cumvar_refCOV >= 0.85, 1, 'first');
         refCOV_top_PCs = max(1, min(refCOV_top_PCs, N_EEG_electrodes - 1));
-        % fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
+        fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
 
     % Top PCs for SSI (separate from refCOV top PCs)
         SSI_top_PCs = 3;
-    % disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
+    disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
 end
 
+if refCOV_top_PCs < SSI_top_PCs
+    warning('GEDAI:LowRefCOVPCs', 'refCOV variance appears to be concentrated in too few principal components. Verify that leadfield matrix is well constructed.');
+end
 
 % Apply refCOV_top_PCs
     % Use eigs for truncated decomposition (efficiency optimization)
