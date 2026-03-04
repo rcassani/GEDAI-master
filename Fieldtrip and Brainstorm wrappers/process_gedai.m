@@ -69,6 +69,10 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.visualize_artifacts.Comment = 'Visualize artifacts';
     sProcess.options.visualize_artifacts.Type    = 'checkbox';
     sProcess.options.visualize_artifacts.Value   = 0;
+    % === SENSAI visualization
+    sProcess.options.visualize_sensai.Comment = 'SENSAI visualization';
+    sProcess.options.visualize_sensai.Type    = 'checkbox';
+    sProcess.options.visualize_sensai.Value   = 0;
     % === Save artifacts data
     sProcess.options.save_artifacts.Comment = 'Save artifacts data';
     sProcess.options.save_artifacts.Type    = 'checkbox';
@@ -89,7 +93,7 @@ end
 
 
 %% ===== GET OPTIONS =====
-function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, enova_threshold, save_artifacts] = GetOptions(sProcess)
+function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, save_artifacts] = GetOptions(sProcess)
     artifact_threshold_type = sProcess.options.artifact_threshold_type.Value;
     epoch_size_in_cycles    = sProcess.options.epoch_size_in_cycles.Value{1};
     lowcut_frequency        = sProcess.options.lowcut_frequency.Value{1};
@@ -100,6 +104,7 @@ function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_m
     end
     parallel             = sProcess.options.parallel.Value;
     visualize_artifacts  = sProcess.options.visualize_artifacts.Value;
+    visualize_sensai     = sProcess.options.visualize_sensai.Value;
     if isfield(sProcess.options, 'save_artifacts') && isfield(sProcess.options.save_artifacts, 'Value')
         save_artifacts = sProcess.options.save_artifacts.Value;
     else
@@ -138,7 +143,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     end
 
     % Get options
-    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, enova_threshold, save_artifacts] = GetOptions(sProcess);
+    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, save_artifacts] = GetOptions(sProcess);
 
     % Iterate over inputs
     for iInput = 1:length(sInputs)
@@ -282,7 +287,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_MAG = 'interpolated';
                 end
-                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts, enova_threshold, signal_type);
+                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts, enova_threshold, signal_type, visualize_sensai);
 
                 % --- GRAD ---
                 ChannelMatGRAD = ChannelMatFiltered;
@@ -299,7 +304,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_GRAD = 'interpolated';
                 end
-                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts, enova_threshold, signal_type);
+                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts, enova_threshold, signal_type, visualize_sensai);
 
                 % --- Recombine ---
                 EEGclean = brainstorm2eeglab(sInputFiltered, ChannelMatFiltered);
@@ -342,7 +347,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param = 'interpolated';
                 end
-                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts, enova_threshold, signal_type);
+                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts, enova_threshold, signal_type, visualize_sensai);
             end
 
             % =========================================================
