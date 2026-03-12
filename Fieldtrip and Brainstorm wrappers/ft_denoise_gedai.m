@@ -11,9 +11,20 @@ function [data_clean, data_artifacts, SENSAI_score, SENSAI_score_per_band, artif
 %
 % Optional cfg fields:
 %   cfg.artifact_threshold_type  (char)    - 'auto-', 'auto', or 'auto+'. [Default: 'auto']
+%                                 Or integer determining deartifacting strength with range [0 10]. Stronger threshold type ("auto+") might remove more noise at the
+%                                 expense of signal, while milder threshold. ("auto-") might retain more signal at the expense of noise.
+%                         
 %   cfg.epoch_size               (double)  - Epoch size in wave CYCLES. [Default: 12]
 %   cfg.lowcut_frequency         (double)  - Low-cut frequency in Hz. [Default: 0.5]
 %   cfg.ref_matrix_type          (char or matrix) - Leadfield reference. [Default: 'precomputed']
+%                                   Matrix used as a reference for deartifacting.
+%                                  The default "precomputed" uses a BEM leadfield for
+%                                  standard electrode locations precomputed through 
+%                                  OPENMEEG (343 electrodes) based on 10-5 system. 
+%                                 "interpolated" uses the precomputed leadfield and 
+%                                 interpolates it to non-standard electrode locations.
+%                                 Altenatively, you can input a "custom" covariance matrix
+%                                 (with dimensions channel x channel) using the name of its matlab variable
 %   cfg.parallel                 (logical) - Use parallel processing. [Default: true]
 %   cfg.visualize_artifacts      (logical) - Visualize artifacts. [Default: false]
 %   cfg.cat_trials               (logical) - Concatenate trials before denoising. [Default: true]
