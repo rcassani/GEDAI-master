@@ -46,7 +46,7 @@ Treshold1 = T1 * prctile(log_Eig_val_all,percentile_threshold);
 
 
 %% Cleaning EEG by removing outlying GEVD components
-epoch_samples = srate * epoch_size;
+epoch_samples = round(srate * epoch_size);
 artifacts = zeros(size(EEGdata_epoched), 'like', EEGdata_epoched);
 cleaned_epoched_data = zeros(size(EEGdata_epoched), 'like', EEGdata_epoched);
 if nargin < 8 || isempty(cosine_weights)

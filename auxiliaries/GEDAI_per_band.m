@@ -41,7 +41,7 @@ end
 
 %% Pad and Epoch Data
 pnts_original = size(eeg_data, 2); 
-epoch_samples = srate * epoch_size;
+epoch_samples = round(srate * epoch_size);
 
 remainder = rem(pnts_original, epoch_samples);
 if remainder ~= 0
@@ -230,7 +230,7 @@ artifacts_data = artifacts_data(:, 1:pnts_original);
 original_data = cleaned_data + artifacts_data;
 
 % Reshape into epochs (channels x samples x epochs)
-epoch_samples = srate * epoch_size;
+epoch_samples = round(srate * epoch_size);
 % Handle potential padding/truncation: use floor to get full epochs
 num_epochs_possible = floor(size(original_data, 2) / epoch_samples);
 len_to_use = num_epochs_possible * epoch_samples;

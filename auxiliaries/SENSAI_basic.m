@@ -31,7 +31,7 @@ else
 end
 top_PCs = 3; % Always keep subspace comparison at 3 PCs 
 num_chans = size(refCOV, 1);
-epoch_samples = srate * epoch_size;
+epoch_samples = round(srate * epoch_size);
 % Top eigenvectors of refCOV subspace
 [evecs_Template_cov, evals_Template_cov] = eig(refCOV_reg);
 [~, sidxS_Template_cov] = sort(diag(evals_Template_cov), 'descend');
