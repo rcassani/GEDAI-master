@@ -47,6 +47,8 @@ doi: https://doi.org/10.1101/2025.10.04.680449
 ### Watch the walktrough video on Youtube:
 ![Watch the Walkthrough video](https://github.com/user-attachments/assets/c1488fa6-236c-4cf8-9483-61728fc60a31)
 
+https://youtu.be/qSM5narynzc
+
 ## License
 You may use this software under the terms of the PolyForm Noncommercial License 1.0.0 [LICENSE](LICENSE). This is suitable for personal use, research, or evaluation.
 
