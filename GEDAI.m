@@ -237,7 +237,9 @@ else
         leadfield_EEG = L.leadfield4GEDAI.EEG;
         
         % Average reference the Gain matrix (channels x sources)
-        leadfield_EEG.data = L.leadfield4GEDAI.Gain - mean(L.leadfield4GEDAI.Gain, 1); 
+        % Using non-rank-deficient average reference (to match EEG data processing)
+        leadfield_EEG.data = L.leadfield4GEDAI.Gain - sum(L.leadfield4GEDAI.Gain, 1) / (size(L.leadfield4GEDAI.Gain, 1) + 1); 
+
         
         % 3. Interpolation and Covariance
         interpolated_EEG = interp_mont_GEDAI(leadfield_EEG, EEGavRef.chanlocs);
