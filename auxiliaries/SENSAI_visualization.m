@@ -49,8 +49,8 @@ lpow_before    = log10(extract_power(C_before));
 lpow_after     = log10(extract_power(C_after));
 lpow_artifacts = log10(extract_power(C_artifacts));
 
-% Reference "ideal" point: SSI=1, power = trace of leadfield cov
-ref_lpow = log10(trace(ref_cov));
+% Ideal Target: 100% Subspace Alignment at current signal power
+ideal_power_target = median(lpow_after);
 
 %% ── 4. 2D LDA on [SSI, log-power] ──────────────────────────────────────
 X_lda = [ssi_after,     lpow_after; ...
@@ -81,8 +81,9 @@ hold(ax1, 'on');
 [~, si] = sort(ssi_before, 'ascend');
 scatter(ax1, lpow_before(si), ssi_before(si), 38, ssi_before(si), ...
         'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.75);
-scatter(ax1, ref_lpow, 1, 220, col_star, 'p', 'filled', ...
-        'MarkerEdgeColor', 'k', 'LineWidth', 0.8);
+
+% Ideal alignment horizon
+yline(ax1, 1, '--', 'Color', col_star, 'LineWidth', 1.5, 'Alpha', 0.6);
 draw_ellipse(ax1, lpow_before, ssi_before, col_bef, 0.95);
 
 colormap(ax1, parula);
@@ -92,11 +93,11 @@ clim(ax1, [0 1]);
 
 xlabel(ax1, 'log_{10}( Epoch Power )',                'FontSize', 11);
 ylabel(ax1, 'SSI  (geom. mean of top-3 PC cosines)', 'FontSize', 11);
-title(ax1, sprintf('Before GEDAI\nn = %d epochs  |  Mean SSI = %.3f', ...
+title(ax1, sprintf('Before GEDAI\nn = %d epochs (50%% overlapping)  |  Mean SSI = %.3f', ...
       numel(ssi_before), mean(ssi_before)), 'FontSize', 11);
-ylim(ax1, [-0.05 1.10]);
+ylim(ax1, [-0.05 1.15]);
 grid(ax1, 'on');  ax1.GridAlpha = 0.20;
-text(ax1, ref_lpow, 1.02, ' Leadfield', 'FontSize', 8, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center');
+text(ax1, mean(xlim(ax1)), 1.08, 'Ideal Subspace Alignment', 'FontSize', 9, 'Color', 0.4*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
 % ── Panel 2: After GEDAI  (Signal vs Noise) ──────────────────────────────
 ax2 = subplot(1, 2, 2);
@@ -106,19 +107,22 @@ h_noise = scatter(ax2, lpow_artifacts, ssi_artifacts, 38, col_noise, ...
                   'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.50);
 h_sig   = scatter(ax2, lpow_after,     ssi_after,     38, col_sig, ...
                   'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.70);
-h_star  = scatter(ax2, ref_lpow, 1, 220, col_star, 'p', 'filled', ...
-                  'MarkerEdgeColor', 'k', 'LineWidth', 0.8);
+
+% Ideal alignment horizon and dataset-specific target star
+yline(ax2, 1, '--', 'Color', col_star, 'LineWidth', 1.5, 'Alpha', 0.6);
+h_star = scatter(ax2, ideal_power_target, 1, 250, col_star, 'p', 'filled', ...
+                  'MarkerEdgeColor', 'k', 'LineWidth', 1.0);
 
 % 95% confidence ellipses
 draw_ellipse(ax2, lpow_after,     ssi_after,     col_sig,   0.95);
 draw_ellipse(ax2, lpow_artifacts, ssi_artifacts, col_noise, 0.95);
 
 if ~isnan(lda_accuracy)
-    ttl = sprintf('After GEDAI  |  2D LDA accuracy: %.1f%%\nSignal n=%d   Noise n=%d', ...
-                  lda_accuracy, numel(ssi_after), numel(ssi_artifacts));
+    ttl = sprintf('After GEDAI  |  2D LDA accuracy: %.1f%%\nMean SSSI: %.3f   |   Mean NSSI: %.3f', ...
+                  lda_accuracy, mean(ssi_after), mean(ssi_artifacts));
 else
-    ttl = sprintf('After GEDAI\nSignal n=%d   Noise n=%d', ...
-                  numel(ssi_after), numel(ssi_artifacts));
+    ttl = sprintf('After GEDAI\nMean SSSI: %.3f   |   Mean NSSI: %.3f', ...
+                  mean(ssi_after), mean(ssi_artifacts));
 end
 title(ax2, ttl, 'FontSize', 11);
 
@@ -129,9 +133,9 @@ legend(ax2, [h_star, h_sig, h_noise], ...
         sprintf('Signal  (mean SSI=%.3f)', mean(ssi_after)), ...
         sprintf('Noise   (mean SSI=%.3f)', mean(ssi_artifacts))}, ...
        'Location', 'best', 'FontSize', 9);
-ylim(ax2, [-0.05 1.10]);
+ylim(ax2, [-0.05 1.15]);
 grid(ax2, 'on');  ax2.GridAlpha = 0.20;
-text(ax2, ref_lpow, 1.02, ' Leadfield', 'FontSize', 8, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center');
+text(ax2, ideal_power_target, 1.08, 'Target Subspace', 'FontSize', 9, 'Color', 0.4*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
 % ── Match X-axis range (power): left panel locked to right panel's limits ──
 all_after_lpow = [lpow_after(:); lpow_artifacts(:)];
@@ -141,7 +145,7 @@ xlim(ax1, x_lims);
 xlim(ax2, x_lims);
 
 % ── Shared super-title ────────────────────────────────────────────────────
-sgtitle('SENSAI:  Subspace Similarity  ×  Epoch Power', ...
+sgtitle('SENSAI visualization:  Subspace Similarity  vs  Epoch Power', ...
         'FontSize', 13, 'FontWeight', 'bold');
 end
 
