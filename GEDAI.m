@@ -767,55 +767,75 @@ end
 
 
     % --- Manifold Classification (Broadband) BEFORE Cleaning ---
+    % Uses 50% overlapping 1-second epochs for denser coverage in the scatter plot
     if ~isempty(refCOV)
         %fprintf('\nGenerating SENSAI Plot for Broadband data...\n');
         
-        % Calculate Covariance of every epoch for broadband data BEFORE cleaning
-        % Using the same padding logic as GEDAI_per_band for consistency
-        pnts_original = size(EEGavRef.data, 2);
-        epoch_samples = round(EEGavRef.srate * broadband_epoch_size);
-        eeg_data_temp = EEGavRef.data;
+        % 50% overlapping epoch parameters
+        epoch_samples    = round(EEGavRef.srate * broadband_epoch_size); % 1-second window
+        epoch_step       = floor(epoch_samples / 2);                     % 50% overlap
+        pnts_original    = size(EEGavRef.data, 2);
+        eeg_data_temp    = EEGavRef.data;
         
-        remainder = rem(pnts_original, epoch_samples);
-        if remainder ~= 0
-            samples_to_pad = epoch_samples - remainder;
-            reflection_segment = eeg_data_temp(:, end-samples_to_pad+1:end);
+        % Pad so the last window is complete
+        last_start = floor((pnts_original - epoch_samples) / epoch_step) * epoch_step + 1;
+        last_end   = last_start + epoch_samples - 1;
+        if last_end > pnts_original
+            samples_to_pad = last_end - pnts_original;
+            reflection_segment = eeg_data_temp(:, end - samples_to_pad + 1 : end);
             eeg_data_temp = [eeg_data_temp, fliplr(reflection_segment)];
         end
         
-        EEGdata_epoched = reshape(eeg_data_temp, size(eeg_data_temp, 1), epoch_samples, []);
-        num_epochs = size(EEGdata_epoched, 3);
+        % Compute starts for all 50%-overlapping windows
+        num_epochs = floor((size(eeg_data_temp, 2) - epoch_samples) / epoch_step) + 1;
         COV_emp_array_before = cell(num_epochs, 1);
         for epo = 1:num_epochs
-            COV_emp_array_before{epo} = cov(EEGdata_epoched(:,:,epo)');
+            i_start = (epo - 1) * epoch_step + 1;
+            i_end   = i_start + epoch_samples - 1;
+            COV_emp_array_before{epo} = cov(eeg_data_temp(:, i_start:i_end)');
         end
     end
 
 
     % --- Manifold Classification (Broadband) AFTER Cleaning ---
+    % Uses the same 50% overlapping 1-second epoch parameters as the BEFORE block
     if visualize_manifold && ~isempty(refCOV)
         % fprintf('\nGenerating SENSAI Plot for Final Reconstructed Data (Before/After)...\n');
         
-        % Calculate Covariance of every epoch for final data AFTER full cleaning pipeline
-        eeg_data_temp = EEGclean.data;
+        eeg_data_temp      = EEGclean.data;
         artifact_data_temp = EEGartifacts.data;
         
-        if exist('remainder', 'var') && remainder ~= 0
-            reflection_segment = eeg_data_temp(:, end-samples_to_pad+1:end);
-            eeg_data_temp = [eeg_data_temp, fliplr(reflection_segment)];
-
-            reflection_segment_artifact = artifact_data_temp(:, end-samples_to_pad+1:end);
-            artifact_data_temp = [artifact_data_temp, fliplr(reflection_segment_artifact)];
+        % Pad each signal independently so the last window is complete
+        pnts_clean = size(eeg_data_temp, 2);
+        last_start_clean = floor((pnts_clean - epoch_samples) / epoch_step) * epoch_step + 1;
+        last_end_clean   = last_start_clean + epoch_samples - 1;
+        if last_end_clean > pnts_clean
+            pad_clean = last_end_clean - pnts_clean;
+            eeg_data_temp = [eeg_data_temp, fliplr(eeg_data_temp(:, end - pad_clean + 1 : end))];
         end
         
-        EEGdata_epoched = reshape(eeg_data_temp, size(eeg_data_temp, 1), epoch_samples, []);
-        EEGartifacts_epoched = reshape(artifact_data_temp, size(artifact_data_temp, 1), epoch_samples, []);
+        pnts_art = size(artifact_data_temp, 2);
+        last_start_art = floor((pnts_art - epoch_samples) / epoch_step) * epoch_step + 1;
+        last_end_art   = last_start_art + epoch_samples - 1;
+        if last_end_art > pnts_art
+            pad_art = last_end_art - pnts_art;
+            artifact_data_temp = [artifact_data_temp, fliplr(artifact_data_temp(:, end - pad_art + 1 : end))];
+        end
         
-        COV_emp_array_after = cell(num_epochs, 1);
-        COV_emp_array_artifacts = cell(num_epochs, 1);
-        for epo = 1:num_epochs
-            COV_emp_array_after{epo} = cov(EEGdata_epoched(:,:,epo)');
-            COV_emp_array_artifacts{epo} = cov(EEGartifacts_epoched(:,:,epo)');
+        % 50% overlapping windows – reuse num_epochs from the BEFORE block
+        num_epochs_after = floor((size(eeg_data_temp, 2) - epoch_samples) / epoch_step) + 1;
+        COV_emp_array_after     = cell(num_epochs_after, 1);
+        COV_emp_array_artifacts = cell(num_epochs_after, 1);
+        for epo = 1:num_epochs_after
+            i_start = (epo - 1) * epoch_step + 1;
+            i_end   = i_start + epoch_samples - 1;
+            COV_emp_array_after{epo}     = cov(eeg_data_temp(:, i_start:i_end)');
+            COV_emp_array_artifacts{epo} = cov(artifact_data_temp(:, i_start:i_end)');
+        end
+        
+        % Align BEFORE array to the same epoch count for a fair comparison
+        if num_epochs_after < num_epochs
+            COV_emp_array_before = COV_emp_array_before(1:num_epochs_after);
         end
         
         SENSAI_visualization(refCOV, COV_emp_array_before, COV_emp_array_after, COV_emp_array_artifacts);
