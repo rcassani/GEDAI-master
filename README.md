@@ -13,7 +13,7 @@
 
 **B)** Each data covariance matrix (dataCOV) is decomposed into source components with GEVD.  
 **C)** The GEVD uses a fixed theoretical reference matrix (refCOV) across all epochs, based on the leadfield matrix of an EEG forward model.  
-**D)** To determine the optimal threshold separating brain and artifactual subspaces, output EEG data is evaluated using the Signal & Noise Subspace Alignment Index (SENSAI). This is done by respectively maximising and minimizing the subspace similarities of the retained "signal" and removed "noise" with the refCOV. 
+**D)** To determine the optimal threshold separating brain and artifactual subspaces, output EEG data is evaluated using the Signal & Noise Subspace Alignment Index (SENSAI). This is done by respectively maximising and minimizing the subspace similarity index (SSI) of the retained "signal" (SSSI) and removed "noise" (NSSI) with the refCOV. 
 
 ### Example videos of unsupervised GEDAI denoising
 
