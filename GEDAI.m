@@ -677,6 +677,37 @@ if ~isempty(regions)
     else
         EEGartifacts.times = EEGartifacts.xmin*1000;
     end
+    
+    % --- Update event latencies ---
+    % Replicate eeg_eegrej logic: shift events and remove those lying within rejected regions
+    if isfield(EEGclean, 'event') && ~isempty(EEGclean.event) && isfield(EEGclean.event, 'latency')
+        eventLatencies = [EEGclean.event.latency];
+        oriEventLatencies = eventLatencies;
+        rmEvent = [];
+        
+        % Ensure regions are sorted
+        regions_sorted = sortrows(sort(regions, 2));
+        
+        for iReg = 1:size(regions_sorted, 1)
+            % Find events within the current rejected region
+            reject_idx = find(oriEventLatencies >= regions_sorted(iReg,1) & oriEventLatencies <= regions_sorted(iReg,2));
+            rmEvent = [rmEvent reject_idx];
+            
+            % Shift events occurring after the start of this rejected region
+            shift_amount = regions_sorted(iReg,2) - regions_sorted(iReg,1) + 1;
+            idx_to_shift = find(oriEventLatencies > regions_sorted(iReg,1));
+            eventLatencies(idx_to_shift) = eventLatencies(idx_to_shift) - shift_amount;
+        end
+        
+        for iEvent = 1:length(EEGclean.event)
+            EEGclean.event(iEvent).latency = eventLatencies(iEvent);
+        end
+        EEGclean.event(rmEvent) = [];
+    end
+
+    if isfield(EEGartifacts, 'event')
+        EEGartifacts.event = EEGclean.event;
+    end
 end
 
 % Calculate final SENSAI score (after potential epoch rejection)
