@@ -224,11 +224,7 @@ else
     has_cartesian = length([EEGavRef.chanlocs.X]) == num_chans;
     has_spherical = length([EEGavRef.chanlocs.sph_theta]) == num_chans;
     
-    if ~has_cartesian || ~has_spherical
-        error(['CRITICAL: Channel locations are incomplete. ' ...
-               'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
-    
-    else
+    if has_cartesian || has_spherical
         % 2. Leadfield Processing
         disp([newline 'GEDAI Leadfield model: BEM interpolated for EEG'])
         L = load('fsavLEADFIELD_4_GEDAI.mat');
@@ -245,8 +241,13 @@ else
         interpolated_EEG = interp_mont_GEDAI(leadfield_EEG, EEGavRef.chanlocs);
         refCOV = interpolated_EEG.data * interpolated_EEG.data';
         
-        end
-    end
+     else
+         error(['CRITICAL: Channel locations are incomplete. ' ...
+               'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
+    
+
+     end
+   end
 end
 
 
