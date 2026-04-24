@@ -86,8 +86,8 @@ try
     lda_full     = fitcdiscr(X_lda, Y_lda);
     
     % --- Signal Silhouette Score ---
-    % X_lda is [SSI, Power]. Labels are 1 (Signal), 0 (Noise).
-    sil_scores   = silhouette(X_lda, Y_lda, 'sqEuclidean');
+    % User preference: Only sensitive to the Y-axis (SSI) separation.
+    sil_scores   = silhouette(X_lda(:, 1), Y_lda, 'sqEuclidean');
     sil_signal   = mean(sil_scores(Y_lda == 1));
 catch
     lda_accuracy = NaN;
@@ -122,7 +122,6 @@ ylabel(ax1, sprintf('SSI (geom. mean of top-%d PC cosines)', SSI_top_PCs), 'Font
 ylim(ax1, [-0.05 1.15]);
 set(ax1, 'YTickMode', 'auto', 'YTickLabelMode', 'auto', 'TickDir', 'both');
 grid(ax1, 'off');
-text(ax1, ideal_power_target, 1.12, 'Leadfield Subspace Alignment', 'FontSize', 9, 'Color', 0.4*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
 % --- Panel 2: After GEDAI ---
 ax2 = subplot(1, 2, 2);
