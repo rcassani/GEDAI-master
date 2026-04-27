@@ -115,7 +115,9 @@ scatter(ax1, lpow_before(si), ssi_before(si), 38, ssi_before(si), ...
 yline(ax1, 1, '--', 'Color', col_star, 'LineWidth', 1.5, 'Alpha', 0.6);
 colormap(ax1, parula);
 cb = colorbar(ax1, 'eastoutside');
-cb.Label.String = 'SSI composite'; clim(ax1, [0 1]);
+cb.Label.String = 'SSI (Subspace Similarity Index) relative to Leadfield';
+cb.Label.FontSize = 12;
+clim(ax1, [0 1]);
 
 xlabel(ax1, 'Epoch Power (dB)', 'FontSize', 11);
 ylabel(ax1, sprintf('SSI (geom. mean of top-%d PC cosines)', SSI_top_PCs), 'FontSize', 11);
@@ -123,15 +125,16 @@ ylim(ax1, [-0.05 1.15]);
 set(ax1, 'YTickMode', 'auto', 'YTickLabelMode', 'auto', 'TickDir', 'both');
 grid(ax1, 'off');
 
+
 % --- Panel 2: After GEDAI ---
 ax2 = subplot(1, 2, 2);
 set(ax2, 'Position', [0.55, 0.12, 0.35, 0.74]); 
 hold(ax2, 'on');
 
 h_noise = scatter(ax2, lpow_artifacts, ssi_artifacts, 38, col_noise, ...
-                  'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.50);
+                  'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.40);
 h_sig   = scatter(ax2, lpow_after, ssi_after, 38, col_sig, ...
-                  'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.70);
+                  'filled', 'MarkerEdgeColor', 'none', 'MarkerFaceAlpha', 0.40);
 
 yline(ax2, 1, '--', 'Color', col_star, 'LineWidth', 1.5, 'Alpha', 0.6);
 h_star = scatter(ax2, ideal_power_target, 1, 250, col_star, 'p', 'filled', 'MarkerEdgeColor', 'k');
@@ -149,6 +152,7 @@ all_vals = [lpow_before; lpow_after; lpow_artifacts; ext_b'; ext_a'; ext_n'];
 x_min = min(all_vals); x_max = max(all_vals);
 x_lims = [x_min - 2, x_max + 5]; 
 xlim(ax1, x_lims); xlim(ax2, x_lims);
+text(ax1, mean(x_lims), 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
 % ── 5.1 LDA Shading ──
 if ~isempty(lda_full)
@@ -163,7 +167,7 @@ if ~isempty(lda_full)
     colormap(ax2, bg_cmap); clim(ax2, [0 1]);
     uistack(h_cont, 'bottom');
 end
-text(ax2, ideal_power_target, 1.12, 'Leadfield Subspace', 'FontSize', 9, 'Color', 0.4*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
+text(ax2, ideal_power_target, 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
 xlabel(ax2, 'Epoch Power (dB)', 'FontSize', 11);
 legend(ax2, [h_star, h_sig, h_noise], {'Leadfield Subspace', sprintf('Signal (mean SSI=%.2f)', mean(ssi_after)), sprintf('Noise (mean SSI=%.2f)', mean(ssi_artifacts))}, ...
