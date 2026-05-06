@@ -812,6 +812,9 @@ if visualize_artifacts
     num_rows = ceil(num_plots / num_cols);
     tiledlayout(num_rows, num_cols, 'TileSpacing', 'compact', 'Padding', 'compact');
     
+    % Distinct perceptually-spaced colours for each band
+    band_colors = turbo(max(num_plots, 1));
+    
     for i = 1:num_plots
         nexttile;
         thresh_array = artifact_threshold_array_per_band{i};
@@ -824,7 +827,7 @@ if visualize_artifacts
         end
         
         time_axis_minutes = (1:length(thresh_array)) * current_epoch_size / 60;
-        plot(time_axis_minutes, thresh_array, 'b-', 'LineWidth', 2);
+        plot(time_axis_minutes, thresh_array, '-', 'Color', band_colors(i,:), 'LineWidth', 2);
         
         title(freq_str_cell{i}, 'FontSize', 12);
         
