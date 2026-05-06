@@ -835,14 +835,8 @@ if visualize_artifacts
         ylabel('Threshold', 'FontSize', 10);
         grid on;
         
-        % Adjust y-limits nicely
-        min_y = min(thresh_array);
-        max_y = max(thresh_array);
-        if max_y > min_y
-            ylim([max(0, min_y - 0.5), max_y + 0.5]);
-        else
-            ylim([max(0, min_y - 1), max_y + 1]);
-        end
+        % Fixed y-axis scale across all bands for easy comparison
+        ylim([0, 10]);
     end
 end
 
