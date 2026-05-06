@@ -331,7 +331,8 @@ clear mra_hp
     broadband_maxThreshold = 12;
     [cleaned_broadband_data, ~, broadband_sensai, broadband_thresh, broadband_ENOVA] = GEDAI_per_band(double(EEGavRef.data), EEGavRef.srate, EEGavRef.chanlocs, broadband_artifact_threshold_type, broadband_epoch_size, refCOV, broadband_optimization_type, parallel, signal_type, broadband_minThreshold, broadband_maxThreshold);
     SENSAI_score_per_band = broadband_sensai;
-    artifact_threshold_per_band = broadband_thresh;
+    artifact_threshold_per_band = mean(broadband_thresh);
+    artifact_threshold_array_per_band = {broadband_thresh};
     ENOVA_per_band = broadband_ENOVA;
 
 
@@ -435,6 +436,7 @@ if parallel
     try
         temp_sensai_scores = zeros(1, num_bands_to_process);
         temp_thresholds = zeros(1, num_bands_to_process);
+        temp_thresholds_arrays = cell(1, num_bands_to_process);
         temp_enova_scores = zeros(1, num_bands_to_process);
         
         % MEMORY OPTIMIZED: Incremental band extraction in parallel
@@ -462,12 +464,14 @@ if parallel
             % RAM OPTIMIZATION: Accumulate directly using a reduction variable (avoids massive cell array copies)
             wavelet_band_filtered_data = wavelet_band_filtered_data + cleaned_band_data;
             temp_sensai_scores(f) = temp_sensai;
-            temp_thresholds(f) = temp_thresh;
+            temp_thresholds(f) = mean(temp_thresh);
+            temp_thresholds_arrays{f} = temp_thresh;
             temp_enova_scores(f) = temp_enova_val;
         end
         
         SENSAI_score_per_band = [SENSAI_score_per_band, temp_sensai_scores];
         artifact_threshold_per_band = [artifact_threshold_per_band, temp_thresholds];
+        artifact_threshold_array_per_band = [artifact_threshold_array_per_band, temp_thresholds_arrays];
         ENOVA_per_band = [ENOVA_per_band, temp_enova_scores];
         success_parallel = true;
     catch 
@@ -508,7 +512,8 @@ if ~parallel || ~success_parallel
             % MEMORY OPTIMIZED: Accumulate directly into 2D array
             wavelet_band_filtered_data = wavelet_band_filtered_data + cleaned_band_data;
             SENSAI_score_per_band(f+1) = sensai_val;
-            artifact_threshold_per_band(f+1) = thresh_val;
+            artifact_threshold_per_band(f+1) = mean(thresh_val);
+            artifact_threshold_array_per_band{f+1} = thresh_val;
             ENOVA_per_band(f+1) = enova_val;
             
             % MEMORY OPTIMIZED: Clear band data immediately
@@ -539,7 +544,8 @@ if ~parallel || ~success_parallel
             % MEMORY OPTIMIZED: Accumulate directly into 2D array
             wavelet_band_filtered_data = wavelet_band_filtered_data + cleaned_band_data;
             SENSAI_score_per_band(f+1) = sensai_val;
-            artifact_threshold_per_band(f+1) = thresh_val;
+            artifact_threshold_per_band(f+1) = mean(thresh_val);
+            artifact_threshold_array_per_band{f+1} = thresh_val;
             ENOVA_per_band(f+1) = enova_val;
             
             % MEMORY OPTIMIZED: Clear band data immediately
@@ -780,10 +786,71 @@ disp(['Mean ENOVA: ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
 disp(['Bad epochs rejected: ' num2str(round(percentage_rejected,1)) ' % (' num2str(num_rejected) ' out of ' num2str(original_total_epochs) ' epochs)']);
 disp(['Elapsed time: ' num2str(round(tEnd, 2, 'significant')) ' seconds' newline]);
 
+% --- Sliding Window Sanity Check (Broadband) ---
+broadband_thresh_array = artifact_threshold_array_per_band{1};
+min_thresh = min(broadband_thresh_array);
+max_thresh = max(broadband_thresh_array);
+std_thresh = std(broadband_thresh_array);
+
+disp('--- Sliding Threshold Sanity Check (Broadband) ---');
+disp(['Minimum Threshold : ' num2str(round(min_thresh, 2))]);
+disp(['Maximum Threshold : ' num2str(round(max_thresh, 2))]);
+disp(['Standard Deviation: ' num2str(round(std_thresh, 2))]);
+if std_thresh == 0
+    disp('Note: Threshold did not vary (Recording too short or completely stationary).');
+else
+    disp('Note: Threshold successfully adapted to non-stationarities over time.');
+end
+disp(' ');
+
+if visualize_artifacts
+    figure('Color', 'w', 'Name', 'GEDAI Sliding Thresholds');
+    num_plots = length(artifact_threshold_array_per_band);
+    
+    % Create a tiled layout based on the number of plots (max 3 columns)
+    num_cols = min(num_plots, 3);
+    num_rows = ceil(num_plots / num_cols);
+    tiledlayout(num_rows, num_cols, 'TileSpacing', 'compact', 'Padding', 'compact');
+    
+    for i = 1:num_plots
+        nexttile;
+        thresh_array = artifact_threshold_array_per_band{i};
+        
+        % Determine correct epoch size for accurate time axis
+        if i == 1
+            current_epoch_size = broadband_epoch_size;
+        else
+            current_epoch_size = epoch_sizes_per_wavelet_band(i-1);
+        end
+        
+        time_axis_minutes = (1:length(thresh_array)) * current_epoch_size / 60;
+        plot(time_axis_minutes, thresh_array, 'b-', 'LineWidth', 2);
+        
+        title(freq_str_cell{i}, 'FontSize', 12);
+        
+        % Only label x-axis on the bottom row to save space
+        if i > num_plots - num_cols
+            xlabel('Time (Minutes)', 'FontSize', 10);
+        end
+        ylabel('Threshold', 'FontSize', 10);
+        grid on;
+        
+        % Adjust y-limits nicely
+        min_y = min(thresh_array);
+        max_y = max(thresh_array);
+        if max_y > min_y
+            ylim([max(0, min_y - 0.5), max_y + 0.5]);
+        else
+            ylim([max(0, min_y - 1), max_y + 1]);
+        end
+    end
+end
+
 % Store GEDAI variables in EEG.etc.GEDAI
 EEGclean.etc.GEDAI.SENSAI_score = SENSAI_score;
 EEGclean.etc.GEDAI.SENSAI_score_per_band = SENSAI_score_per_band;
 EEGclean.etc.GEDAI.artifact_threshold_per_band = artifact_threshold_per_band;
+EEGclean.etc.GEDAI.artifact_threshold_array_per_band = artifact_threshold_array_per_band;
 EEGclean.etc.GEDAI.mean_ENOVA = mean_ENOVA;
 EEGclean.etc.GEDAI.ENOVA_per_band = ENOVA_per_band;
 EEGclean.etc.GEDAI.ENOVA_per_epoch = ENOVA_per_epoch;
