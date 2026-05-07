@@ -27,6 +27,7 @@ function [data_clean, data_artifacts, SENSAI_score, SENSAI_score_per_band, artif
 %                                 (with dimensions channel x channel) using the name of its matlab variable
 %   cfg.parallel                 (logical) - Use parallel processing. [Default: true]
 %   cfg.visualize_artifacts      (logical) - Visualize artifacts. [Default: false]
+%   cfg.visualize_manifold       (logical) - Visualize SENSAI manifold. [Default: false]
 %   cfg.cat_trials               (logical) - Concatenate trials before denoising. [Default: true]
 %   cfg.signal_type              (char)    - 'eeg' or 'meg'. Auto-detected if not set.
 %
@@ -59,6 +60,7 @@ def.lowcut_frequency        = 0.5;
 def.ref_matrix_type         = 'precomputed';
 def.parallel                = true;
 def.visualize_artifacts     = false;
+def.visualize_manifold      = false;
 def.cat_trials              = true;
 def.signal_type             = '';       % empty = auto-detect
 
@@ -214,7 +216,6 @@ function [dataClean, timeClean, artifactData, Sscore, Sband, Athr] = ...
     end
 end
 
-% ---------- runGEDAI: call GEDAI with all parameters ----------
 function [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg)
     [EEGclean, EEGart, Sscore, Sband, Athr] = GEDAI( ...
         EEGin, ...
@@ -225,7 +226,8 @@ function [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg)
         cfg.parallel, ...
         cfg.visualize_artifacts, ...
         [], ...              % ENOVA_threshold: [] -> GEDAI default (inf = disabled)
-        cfg.signal_type);
+        cfg.signal_type, ...
+        cfg.visualize_manifold);
 end
 
 % ---------- buildEEGin: construct EEGLAB-style struct from FieldTrip data ----------
