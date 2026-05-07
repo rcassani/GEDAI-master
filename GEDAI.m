@@ -789,21 +789,9 @@ disp(['Mean ENOVA: ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
 disp(['Bad epochs rejected: ' num2str(round(percentage_rejected,1)) ' % (' num2str(num_rejected) ' out of ' num2str(original_total_epochs) ' epochs)']);
 disp(['Elapsed time: ' num2str(round(tEnd, 2, 'significant')) ' seconds' newline]);
 
-% --- Sliding Window Sanity Check (Broadband) ---
-broadband_thresh_array = artifact_threshold_array_per_band{1};
-min_thresh = min(broadband_thresh_array);
-max_thresh = max(broadband_thresh_array);
-std_thresh = std(broadband_thresh_array);
-
-disp('--- Sliding Threshold Sanity Check (Broadband) ---');
-disp(['Minimum Threshold : ' num2str(round(min_thresh, 2))]);
-disp(['Maximum Threshold : ' num2str(round(max_thresh, 2))]);
-disp(['Standard Deviation: ' num2str(round(std_thresh, 2))]);
-if std_thresh == 0
-    disp('Note: Threshold did not vary (Recording too short or completely stationary).');
-else
+if smoothing_window_seconds ~= Inf
     disp('Note: Threshold successfully adapted to non-stationarities over time.');
-end
+
 disp(' ');
 
 if visualize_artifacts
@@ -842,8 +830,9 @@ if visualize_artifacts
         grid on;
         
         % Fixed y-axis scale across all bands for easy comparison
-        ylim([0, 10]);
+        ylim([-1.9, 10]);
     end
+end
 end
 
 % Store GEDAI variables in EEG.etc.GEDAI
