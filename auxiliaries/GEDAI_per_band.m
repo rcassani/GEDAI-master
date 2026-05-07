@@ -11,7 +11,7 @@
 % For any questions, please contact:
 % dr.t.ros@gmail.com
 
-function [cleaned_data, artifacts_data, SENSAI_score, artifact_threshold_out, ENOVA] = GEDAI_per_band(eeg_data, srate, chanlocs, artifact_threshold_type, epoch_size, refCOV, optimization_type, parallel, signal_type, minThreshold, maxThreshold)
+function [cleaned_data, artifacts_data, SENSAI_score, artifact_threshold_out, ENOVA] = GEDAI_per_band(eeg_data, srate, chanlocs, artifact_threshold_type, epoch_size, refCOV, optimization_type, parallel, signal_type, minThreshold, maxThreshold, smoothing_window_seconds)
 
 if isempty(eeg_data)
     error('Cannot process empty data');
@@ -153,7 +153,16 @@ end
 
 
 % --- Optimization Method Switch (Sliding Window) ---
-window_seconds = 60;
+% smoothing_window_seconds controls the sliding window size.
+% Inf (default) means use the entire file as one window (no sliding = original global behavior).
+if nargin < 12 || isempty(smoothing_window_seconds)
+    smoothing_window_seconds = Inf;
+end
+if isinf(smoothing_window_seconds)
+    window_seconds = N_epochs * epoch_size; % effectively the whole file
+else
+    window_seconds = smoothing_window_seconds;
+end
 window_epochs = max(1, round(window_seconds / epoch_size));
 step_epochs = max(1, round(window_epochs / 2));
 
