@@ -266,65 +266,80 @@ hp_wavelet_levels = min(hp_wavelet_levels, max_possible_level);
 hp_wavelet_levels = max(hp_wavelet_levels, 3);
 wavelet_type = 'haar';
 
-% Decompose the signal
-% Robust execution order: GPU(Double) -> GPU(Single) -> CPU(Double) -> CPU(Single)
-success = false;
+% Identify wavelet bands to remove based on lowcut_frequency
+srate = EEGavRef.srate;
+num_bands_hp = hp_wavelet_levels + 1;
+upper_bounds = srate ./ (2.^(1:num_bands_hp));
+bands_to_zero = find(upper_bounds <= lowcut_frequency);
 
-% disp([newline 'Wavelet high-pass filtering > ' num2str(highpass_frequency) 'Hz']);
-warning('off');
-% Attempt GPU Processing
-if gpuDeviceCount > 0
-    try
-        disp('Attempting GPU processing (Double Precision)...');
-        parallel.gpu.enableCUDAForwardCompatibility(true)
-        data_gpu = gpuArray(EEGavRef.data');
-        wpt_hp = modwt_custom(data_gpu, wavelet_type, hp_wavelet_levels);
-        mra_hp = gather(modwtmra_custom(wpt_hp, wavelet_type)); 
-        clear data_gpu wpt_hp;
-        success = true;
-    catch 
-        warning('GPU (Double) failed: %s. Attempting GPU (Single Precision)...');
+if ~isempty(bands_to_zero)
+    % Robust execution order: GPU(Double) -> GPU(Single) -> CPU(Double) -> CPU(Single)
+    success = false;
+    warning('off');
+    
+    % Attempt GPU Processing
+    if gpuDeviceCount > 0
         try
-            data_gpu = gpuArray(single(EEGavRef.data'));
-            wpt_hp = modwt_custom(data_gpu, wavelet_type, hp_wavelet_levels);
-            mra_hp = gather(modwtmra_custom(wpt_hp, wavelet_type)); 
-            clear data_gpu wpt_hp;
+            disp('Attempting GPU processing (Double Precision)...');
+            parallel.gpu.enableCUDAForwardCompatibility(true)
+            data_gpu = gpuArray(EEGavRef.data');
+            
+            low_freq_noise_gpu = zeros(size(data_gpu), 'like', data_gpu);
+            for b = 1:length(bands_to_zero)
+                band_idx = bands_to_zero(b);
+                low_freq_noise_gpu = low_freq_noise_gpu + modwt_single_band(data_gpu, wavelet_type, hp_wavelet_levels, band_idx);
+            end
+            
+            EEGavRef.data = EEGavRef.data - gather(low_freq_noise_gpu)';
+            clear data_gpu low_freq_noise_gpu;
             success = true;
         catch 
-            warning('GPU (Single) failed: %s. Falling back to CPU.');
+            warning('GPU (Double) failed. Attempting GPU (Single Precision)...');
+            try
+                data_gpu = gpuArray(single(EEGavRef.data'));
+                low_freq_noise_gpu = zeros(size(data_gpu), 'like', data_gpu);
+                for b = 1:length(bands_to_zero)
+                    band_idx = bands_to_zero(b);
+                    low_freq_noise_gpu = low_freq_noise_gpu + modwt_single_band(data_gpu, wavelet_type, hp_wavelet_levels, band_idx);
+                end
+                
+                EEGavRef.data = EEGavRef.data - double(gather(low_freq_noise_gpu)');
+                clear data_gpu low_freq_noise_gpu;
+                success = true;
+            catch 
+                warning('GPU (Single) failed. Falling back to CPU.');
+            end
+        end
+    end
+    
+    % Fallback to CPU if GPU failed or unavailable
+    if ~success
+        try
+            disp('Attempting CPU processing (Double Precision)...');
+            data_cpu = EEGavRef.data';
+            low_freq_noise = zeros(size(data_cpu), 'like', data_cpu);
+            for b = 1:length(bands_to_zero)
+                band_idx = bands_to_zero(b);
+                low_freq_noise = low_freq_noise + modwt_single_band(data_cpu, wavelet_type, hp_wavelet_levels, band_idx);
+            end
+            
+            EEGavRef.data = EEGavRef.data - low_freq_noise';
+            clear data_cpu low_freq_noise;
+        catch 
+            warning('CPU (Double) failed. Attempting CPU (Single Precision)...');
+            % Single precision fallback for OOM
+            data_cpu = single(EEGavRef.data');
+            low_freq_noise = zeros(size(data_cpu), 'like', data_cpu);
+            for b = 1:length(bands_to_zero)
+                band_idx = bands_to_zero(b);
+                low_freq_noise = low_freq_noise + modwt_single_band(data_cpu, wavelet_type, hp_wavelet_levels, band_idx);
+            end
+            
+            EEGavRef.data = EEGavRef.data - double(low_freq_noise');
+            clear data_cpu low_freq_noise;
         end
     end
 end
-
-% Fallback to CPU if GPU failed or unavailable
-if ~success
-    try
-        disp('Attempting CPU processing (Double Precision)...');
-        wpt_hp = modwt_custom(EEGavRef.data', wavelet_type, hp_wavelet_levels);
-        mra_hp = modwtmra_custom(wpt_hp, wavelet_type);
-        clear wpt_hp;
-    catch 
-        warning('CPU (Double) failed: %s. Attempting CPU (Single Precision)...');
-        % Single precision fallback for OOM
-        wpt_hp = modwt_custom(single(EEGavRef.data'), wavelet_type, hp_wavelet_levels);
-        mra_hp = modwtmra_custom(wpt_hp, wavelet_type);
-        clear wpt_hp;
-    end
-end
-
-% Identify wavelet bands to remove based on lowcut_frequency (VECTORIZED)
-srate = EEGavRef.srate;
-num_bands_hp = size(mra_hp, 1);
-% Vectorize: compute all upper bounds at once
-upper_bounds = srate ./ (2.^(1:num_bands_hp));
-bands_to_zero = find(upper_bounds <= lowcut_frequency);
-if ~isempty(bands_to_zero)
-    mra_hp(bands_to_zero, :, :) = 0; % Remove bands below the cutoff
-end
-
-% Reconstruct the high-passed signal
-EEGavRef.data = squeeze(sum(mra_hp, 1))';
-clear mra_hp
 
     % ------------------ GEDAI ------------------------------
 

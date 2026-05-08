@@ -40,33 +40,35 @@ function band_signal = modwtmra_single_band(wpt, wavelet_type, target_band)
         if n_channels == 1
             current_approx = reshape(current_approx, n_samples, 1);
         end
+        
+        for j = level:-1:1
+            step = 2^(j-1);
+            A_shifted = circshift(current_approx, -step, 1);
+            current_approx = 0.5 * inv_sqrt2 * (current_approx + A_shifted);
+        end
     else
-        % Reconstructing a detail band, start with zeros
-        current_approx = zeros(n_samples, n_channels, 'like', wpt);
-    end
-    
-    % Iterate backwards from Level J to 1
-    % Only use coefficients from target_band, all others are zero
-    for j = level:-1:1
+        % Reconstructing a detail band (Wj)
+        % For j > target_band, current_approx remains 0, so we can skip those iterations.
+        
+        % Start at j = target_band
+        j = target_band;
         step = 2^(j-1);
         
-        % Extract detail coefficients only if this is the target band
-        if target_band == j
-            D_j = squeeze(wpt(j, :, :));
-            if n_channels == 1
-                D_j = reshape(D_j, n_samples, 1);
-            end
-        else
-            % Not our target band, use zeros
-            D_j = zeros(n_samples, n_channels, 'like', wpt);
+        D_j = squeeze(wpt(j, :, :));
+        if n_channels == 1
+            D_j = reshape(D_j, n_samples, 1); 
         end
         
-        % IMODWT reconstruction step
-        A_shifted = circshift(current_approx, -step, 1);
         D_shifted = circshift(D_j, -step, 1);
+        % Since current_approx is 0 before this, A_shifted is 0
+        current_approx = 0.5 * inv_sqrt2 * (D_shifted - D_j);
         
-        current_approx = 0.5 * inv_sqrt2 * ...
-            ((current_approx + A_shifted) + (D_shifted - D_j));
+        % For j < target_band
+        for j = (target_band-1):-1:1
+            step = 2^(j-1);
+            A_shifted = circshift(current_approx, -step, 1);
+            current_approx = 0.5 * inv_sqrt2 * (current_approx + A_shifted);
+        end
     end
     
     % Return the reconstructed band signal

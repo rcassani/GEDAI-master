@@ -32,36 +32,43 @@ function mra = modwtmra_custom(wpt, wavelet_type)
     
     for band_idx = 1:n_bands
         % We are reconstructing the signal using ONLY coeff from 'band_idx'.
-        % All other coeffs are zero suitable for the ISWT.
+        % All other coeffs are implicitly zero.
         
-        % Initialize Approximation at Level J.
-        % If band_idx == n_bands (VJ), this starts non-zero. Else zero.
         if band_idx == n_bands
+            % VJ band (Approximation)
             current_approx_recon = squeeze(wpt(n_bands, :, :));
-            % Reshape if squeeze removed dim
             if n_channels == 1
                 current_approx_recon = reshape(current_approx_recon, n_samples, 1);
             end
+            
+            for j = level:-1:1
+                step = 2^(j-1);
+                A_shifted = circshift(current_approx_recon, -step, 1);
+                current_approx_recon = 0.5 * inv_sqrt2 * (current_approx_recon + A_shifted);
+            end
         else
-            current_approx_recon = zeros(n_samples, n_channels, 'like', wpt);
-        end
-        
-        % Iterate backwards from Level J to 1
-        for j = level:-1:1
+            % Wj bands (Details)
+            % For j > band_idx, current_approx_recon remains 0, so we can skip those iterations.
+            
+            % Start at j = band_idx
+            j = band_idx;
             step = 2^(j-1);
-                       
-            if band_idx == j
-                D_j = squeeze(wpt(j, :, :));
-                if n_channels == 1, D_j = reshape(D_j, n_samples, 1); end
-            else
-                D_j = zeros(n_samples, n_channels, 'like', wpt);
+            
+            D_j = squeeze(wpt(j, :, :));
+            if n_channels == 1
+                D_j = reshape(D_j, n_samples, 1); 
             end
             
-            % Compute Estimates shifted
-            A_shifted = circshift(current_approx_recon, -step, 1);
-            D_shifted = circshift(D_j, -step, 1);           
-            current_approx_recon = 0.5 * inv_sqrt2 * ( (current_approx_recon + A_shifted) + (D_shifted - D_j) );
+            D_shifted = circshift(D_j, -step, 1);
+            % Since current_approx_recon is 0, A_shifted is 0
+            current_approx_recon = 0.5 * inv_sqrt2 * (D_shifted - D_j);
             
+            % For j < band_idx
+            for j = (band_idx-1):-1:1
+                step = 2^(j-1);
+                A_shifted = circshift(current_approx_recon, -step, 1);
+                current_approx_recon = 0.5 * inv_sqrt2 * (current_approx_recon + A_shifted);
+            end
         end
         
         % Store the full reconstruction for this band

@@ -34,12 +34,62 @@ function band_signal = modwt_single_band(data, wavelet_type, level, target_band)
         error('target_band must be specified (1 to 2^level+1)');
     end
     
-    % Step 1: Forward MODWT decomposition (computes all bands)
-    % This is necessary - cannot skip levels in wavelet decomposition
-    wpt = modwt_custom(data, wavelet_type, level);
+    if ~strcmpi(wavelet_type, 'haar')
+        error('modwt_single_band currently only supports ''haar'' wavelet.');
+    end
     
-    % Step 2: Reconstruct ONLY the target band
-    band_signal = modwtmra_single_band(wpt, wavelet_type, target_band);
+    % --- FORWARD DECOMPOSITION ---
+    % Compute ONLY the coefficients for target_band to save memory
+    inv_sqrt2 = 1 / sqrt(2);
+    current_approx = data;
+    n_bands = level + 1;
     
-    % Note: wpt is cleared automatically when function exits
+    % If target_band is an approximation (n_bands), we need to go up to 'level'
+    % If it's a detail band (target_band <= level), we only need to go up to 'target_band'
+    max_level_needed = min(target_band, level);
+    
+    for j = 1:max_level_needed
+        step = 2^(j-1);
+        shifted_approx = circshift(current_approx, step, 1);
+        
+        if j == target_band
+            % This is the detail band we want!
+            target_coefs = (shifted_approx - current_approx) * inv_sqrt2;
+        else
+            % We just need the approximation to proceed to the next level
+            current_approx = (current_approx + shifted_approx) * inv_sqrt2;
+        end
+    end
+    
+    if target_band == n_bands
+        % The target is the final approximation band
+        target_coefs = current_approx;
+    end
+    
+    % --- INVERSE RECONSTRUCTION ---
+    % Reconstruct using ONLY target_coefs, bypassing full wpt array allocation
+    current_recon = target_coefs;
+    
+    if target_band == n_bands
+        for j = level:-1:1
+            step = 2^(j-1);
+            A_shifted = circshift(current_recon, -step, 1);
+            current_recon = 0.5 * inv_sqrt2 * (current_recon + A_shifted);
+        end
+    else
+        % It's a detail band. We start reconstruction at j = target_band
+        j = target_band;
+        step = 2^(j-1);
+        
+        D_shifted = circshift(current_recon, -step, 1);
+        current_recon = 0.5 * inv_sqrt2 * (D_shifted - current_recon);
+        
+        for j = (target_band-1):-1:1
+            step = 2^(j-1);
+            A_shifted = circshift(current_recon, -step, 1);
+            current_recon = 0.5 * inv_sqrt2 * (current_recon + A_shifted);
+        end
+    end
+    
+    band_signal = current_recon;
 end
