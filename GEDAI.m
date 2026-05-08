@@ -96,7 +96,7 @@
 % For any questions, please contact:
 % dr.t.ros@gmail.com
 
-function [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band]=GEDAI(EEGin, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, ENOVA_threshold, signal_type, visualize_manifold, smoothing_window_seconds)
+function [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band]=GEDAI(EEGin, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, ENOVA_threshold, signal_type, visualize_manifold, smoothing_window_minutes)
 
 if nargin < 2 || isempty(artifact_threshold_type)
     artifact_threshold_type = 'auto';
@@ -125,9 +125,10 @@ end
 if nargin < 10 || isempty(visualize_manifold)
     visualize_manifold = false;
 end
-if nargin < 11 || isempty(smoothing_window_seconds)
-    smoothing_window_seconds = Inf; % default: use whole file (no sliding window)
+if nargin < 11 || isempty(smoothing_window_minutes)
+    smoothing_window_minutes = Inf; % default: use whole file (no sliding window)
 end
+smoothing_window_seconds = smoothing_window_minutes * 60;
 % Validate signal_type
 if ~ismember(lower(signal_type), {'eeg', 'meg'})
     error('signal_type must be either ''eeg'' or ''meg''');
