@@ -230,7 +230,7 @@ else
     
     if has_cartesian & has_spherical
         % 2. Leadfield Processing
-        disp([newline 'GEDAI Leadfield model: BEM interpolated for EEG'])
+        disp([newline 'GEDAI Leadfield model: BEM warped for EEG'])
         L = load('fsavLEADFIELD_4_GEDAI.mat');
         
         % The leadfield data needs to be average referenced before interpolation
@@ -250,7 +250,39 @@ else
                'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
     
 
-     end
+    end
+
+
+        case 'warped'
+    % 1. Verification of Spatial Locations
+    % We check if the number of populated X and sph_theta coordinates 
+    % matches the actual number of channels.
+    num_chans = length(EEGavRef.chanlocs);
+    has_cartesian = length([EEGavRef.chanlocs.X]) == num_chans;
+    has_spherical = length([EEGavRef.chanlocs.theta]) == num_chans;
+
+
+   if has_cartesian & has_spherical
+        % 2. Leadfield Processing
+        disp([newline 'GEDAI Leadfield model: BEM Surface source model'])
+
+    %  Boundary Element Method (BEM) head model based on EEGLAB/Fieldtrip source model, see https://eeglab.org/tutorials/09_source/Model_Settings.html
+    [~, chanlocs_transform] = coregister(EEGin.chanlocs, 'standard_1005.elc','warp', 'auto', 'manual', 'off');
+    EEGin = pop_dipfit_settings(EEGin, 'hdmfile','standard_vol.mat','mrifile','standard_mri.mat','chanfile','standard_1005.elc','coordformat','MNI','coord_transform',chanlocs_transform);
+    EEGin = pop_leadfield(EEGin, 'sourcemodel','tess_cortex_mid_low_2000V.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); %  Surface ICBM152
+    % EEGin = pop_leadfield(EEGin, 'sourcemodel','head_modelColin27_5003_Standard-10-5-Cap339.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); % Surface Colin27
+    % EEGin = pop_leadfield(EEGin, 'sourcemodel','LORETA-Talairach-BAs.mat','sourcemodel2mni',[],'downsample',1); % Volumetric ICBM152
+    
+    DIPFIT_leadfield=cell2mat(EEGin.dipfit.sourcemodel.leadfield); %Gain matrix
+
+    % Average reference the Gain matrix (channels x sources) using non-rank-deficient average reference 
+    DIPFIT_leadfield = DIPFIT_leadfield- sum(DIPFIT_leadfield, 1) / (size(DIPFIT_leadfield, 1) + 1); 
+
+    refCOV=DIPFIT_leadfield*DIPFIT_leadfield'; % gram matrix
+
+   else
+         error(['CRITICAL: Channel locations are incomplete. ' ...
+               'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
    end
 end
 
