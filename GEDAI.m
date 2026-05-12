@@ -41,6 +41,9 @@
 %                                 "interpolated" uses the precomputed leadfield and 
 %                                 interpolates it to non-standard electrode locations.
 %
+%                                 "precomputed_weighted" uses the precomputed leadfield and 
+%                                 applies depth weighting.
+%
 %                                 Altenatively, you can input a "custom" covariance matrix
 %                                 (with dimensions channel x channel) via a matlab variable
 % 
@@ -215,6 +218,79 @@ else
             end
             refCOV = L.leadfield4GEDAI.gram_matrix_avref(chanidx,chanidx);
 
+        case 'precomputed_weighted'
+            disp([newline 'GEDAI Leadfield model: BEM precomputed weighted for EEG'])
+            L=load('fsavLEADFIELD_4_GEDAI.mat');
+            electrodes_labels = {EEGin.chanlocs.labels};
+            template_electrode_labels = {L.leadfield4GEDAI.electrodes.Name};
+            
+            % Extract matching substrings from EEG labels
+            chanidx = zeros(1, length(electrodes_labels));
+            for i = 1:length(electrodes_labels)
+                eeg_label = electrodes_labels{i};
+                % Try direct match first
+                [found, idx] = ismember(lower(eeg_label), lower(template_electrode_labels));
+                if found
+                    chanidx(i) = idx;
+                else
+                    % Search for template labels within the EEG label
+                    for j = 1:length(template_electrode_labels)
+                        template_label = template_electrode_labels{j};
+                        % Case-insensitive substring search
+                        if contains(lower(eeg_label), lower(template_label))
+                            chanidx(i) = j;
+                            break;
+                        end
+                    end
+                end
+            end
+            
+            if any(chanidx == 0)
+                error('Electrode labels not found. Select "interpolated" leadfield matrix for non-standard locations.');
+            end
+            
+            % 1. Extract your raw leadfield for the matched channels
+            L_raw = L.leadfield4GEDAI.Gain(chanidx, :);
+            
+            % Average reference the Gain matrix (channels x sources)
+            % Using non-rank-deficient average reference (to match EEG data processing)
+            L_raw = L_raw - sum(L_raw, 1) / (size(L_raw, 1) + 1); 
+
+            % Assume L_raw is your [N_channels x (N_sources * 3)] matrix
+            [n_channels, n_cols] = size(L_raw);
+            n_sources = n_cols / 3; % Assuming 3 unconstrained orientations (x,y,z) per dipole
+            
+            % 2. Define your depth weighting parameter (gamma)
+            % 0.5 to 0.8 is standard. 1.0 aggressively boosts deep sources.
+            gamma = 0.8; 
+            
+            % 3. Initialize the weighted leadfield matrix
+            L_weighted = zeros(size(L_raw));
+            
+            % 4. Loop through each source to calculate its norm and apply the weight
+            for i = 1:n_sources
+                % Get the column indices for the x, y, z orientations of source i
+                idx = (i-1)*3 + 1 : i*3;
+                
+                % Extract the 3 columns for this specific source
+                L_source = L_raw(:, idx);
+                
+                % Calculate the Frobenius norm (magnitude) of this source's projection
+                source_norm = norm(L_source, 'fro');
+                
+                % Avoid division by zero for sources outside the brain/empty vertices
+                if source_norm > 1e-12 
+                    % Apply the depth weighting formula
+                    L_weighted(:, idx) = L_source .* (source_norm ^ -gamma);
+                else
+                    L_weighted(:, idx) = L_source; % Leave as zero
+                end
+            end
+            
+            % 5. Proceed with GEDAI
+            % Now use L_weighted to compute your spatial covariance for the "brain" signal
+            refCOV = L_weighted * L_weighted';
+
         case 'interpolated'
     % 1. Verification of Spatial Locations
     % We check if the number of populated X and sph_theta coordinates 
@@ -263,8 +339,8 @@ else
     %  Boundary Element Method (BEM) head model based on EEGLAB/Fieldtrip source model, see https://eeglab.org/tutorials/09_source/Model_Settings.html
     [~, chanlocs_transform] = coregister(EEGin.chanlocs, 'standard_1005.elc','warp', 'auto', 'manual', 'off');
     EEGin = pop_dipfit_settings(EEGin, 'hdmfile','standard_vol.mat','mrifile','standard_mri.mat','chanfile','standard_1005.elc','coordformat','MNI','coord_transform',chanlocs_transform);
-    % EEGin = pop_leadfield(EEGin, 'sourcemodel','tess_cortex_mid_low_2000V.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); %  Surface ICBM152
-    EEGin = pop_leadfield(EEGin, 'sourcemodel','head_modelColin27_5003_Standard-10-5-Cap339.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); % Surface Colin27
+    EEGin = pop_leadfield(EEGin, 'sourcemodel','tess_cortex_mid_low_2000V.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); %  Surface ICBM152
+    % EEGin = pop_leadfield(EEGin, 'sourcemodel','head_modelColin27_5003_Standard-10-5-Cap339.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); % Surface Colin27
     % EEGin = pop_leadfield(EEGin, 'sourcemodel','LORETA-Talairach-BAs.mat','sourcemodel2mni',[],'downsample',1); % Volumetric ICBM152
     
     DIPFIT_leadfield=cell2mat(EEGin.dipfit.sourcemodel.leadfield); %Gain matrix
