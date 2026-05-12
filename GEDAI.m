@@ -262,7 +262,7 @@ else
             
             % 2. Define your depth weighting parameter (gamma)
             % 0.5 to 0.8 is standard. 1.0 aggressively boosts deep sources.
-            gamma = 0.8; 
+            gamma = 0.5; 
             
             % 3. Initialize the weighted leadfield matrix
             L_weighted = zeros(size(L_raw));
