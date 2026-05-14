@@ -1,4 +1,4 @@
-function metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, ref_cov, epoch_duration_sec, signal_type, SSI_top_PCs)
+function metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, ref_cov, epoch_duration_sec, signal_type, SSI_top_PCs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score)
 % SENSAI_VISUALIZATION  2D SENSAI scatter: subspace similarity vs epoch power
 %
 % Inputs:
@@ -96,7 +96,13 @@ catch
 end
 
 %% ── 4. Plotting ─────────────────────────────────────────────────────────
-fig = figure('Name', 'GEDAI SENSAI Analysis', 'Color', 'w', 'Position', [80 100 1350 580], 'Visible', 'off');
+if nargin >= 10 && ~isempty(artifact_threshold_type) && ~isempty(smoothing_window_seconds) && ~isempty(SENSAI_score)
+    plot_title = ['SENSAI visualization (' artifact_threshold_type ' | Window: ' num2str(smoothing_window_seconds) ' s | SENSAI: ' num2str(round(SENSAI_score, 1)) '%)'];
+else
+    plot_title = 'SENSAI visualization:  Subspace Similarity  vs  Epoch Power';
+end
+
+fig = figure('Name', plot_title, 'Color', 'w', 'Position', [80 100 1350 580], 'Visible', 'off');
 
 col_sig  = [0.08 0.72 0.22];
 col_noise= [0.85 0.13 0.13];
@@ -171,9 +177,9 @@ text(ax2, ideal_power_target, 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color
 
 xlabel(ax2, 'Epoch Power (dB)', 'FontSize', 11);
 legend(ax2, [h_star, h_sig, h_noise], {'Leadfield Subspace', sprintf('Signal (mean SSI=%.2f)', mean(ssi_after)), sprintf('Noise (mean SSI=%.2f)', mean(ssi_artifacts))}, ...
-       'Location', 'northeastoutside', 'FontSize', 9);
+       'Location', 'northeastoutside', 'FontSize', 10);
 
-sgtitle('SENSAI visualization:  Subspace Similarity  vs  Epoch Power', 'FontSize', 13, 'FontWeight', 'bold');
+sgtitle(plot_title, 'FontSize', 13, 'FontWeight', 'bold');
 
 % ── 6. Add Marginal Density Distributions ─────────────────────────────────
 % Panel 1 Marginals (Empty data, just for layout/title alignment)

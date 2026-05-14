@@ -21,7 +21,7 @@ artifact_threshold = 'auto';
 epoch_size_in_cycles = 12;
 lowcut_frequency = 0.5;
 ENOVA_threshold = 0.9;
-smoothing_window_minutes_default = Inf;
+smoothing_window_seconds_default = Inf;
 
 % Create an inputParser to handle varargin
 p = inputParser;
@@ -33,10 +33,10 @@ p.parse(varargin{:}); % Parse the input arguments
 % Create GUI for parameter input (rest of the code remains the same)
 uilist = { ...    
     {'style' 'text' 'string' 'Denoising strength'}    {'style' 'popupmenu' 'string' '                    auto|                    auto+|                    auto-'} ...
-    {'style' 'text' 'string' 'Leadfield matrix'}    {'style' 'popupmenu' 'string' '          precomputed|          precomputed_weighted|          interpolated|          warped'} ...
+    {'style' 'text' 'string' 'Leadfield matrix'}    {'style' 'popupmenu' 'string' '          precomputed|          interpolated|          warped'} ...
     {'style' 'text' 'string' 'Epoch size (wave cycles)'} {'style' 'edit' 'string' num2str(epoch_size_in_cycles) 'tag' 'epoch_size_in_cycles'} ...
     {'style' 'text' 'string' 'Low-cut frequency (Hz)'} {'style' 'edit' 'string' num2str(lowcut_frequency) 'tag' 'lowcut_frequency'} ...
-    {'style' 'text' 'string' 'Sliding window (in minutes, Inf=whole file)'} {'style' 'edit' 'string' num2str(smoothing_window_minutes_default) 'tag' 'smoothing_window_minutes'} ...
+    {'style' 'text' 'string' 'Sliding window (in seconds, Inf=whole file)'} {'style' 'edit' 'string' num2str(smoothing_window_seconds_default) 'tag' 'smoothing_window_seconds'} ...
     {} ...
     {'style' 'text' 'string' 'Reject bad epochs:'} {'style' 'checkbox' 'string' '' 'tag' 'reject_by_enova' 'value' 0}, ...
     {'style' 'text' 'string' 'ENOVA Threshold (0-1)'} {'style' 'edit' 'string' num2str(ENOVA_threshold) 'tag' 'ENOVA_threshold'}, ...
@@ -55,15 +55,15 @@ if isempty(out), return; end
 threshold_cell = {'auto', 'auto+', 'auto-'};
 artifact_threshold = threshold_cell{userInput{1}};
 
-ref_matrix_cell = {'precomputed', 'precomputed_weighted', 'interpolated', 'warped'};
+ref_matrix_cell = {'precomputed', 'interpolated', 'warped'};
 ref_matrix_type = ref_matrix_cell{userInput{2}};
 epoch_size_in_cycles = str2double(out.epoch_size_in_cycles);
 lowcut_frequency = str2double(out.lowcut_frequency);
 
 % Parse smoothing window (allow 'Inf' string)
-smoothing_window_minutes = str2double(out.smoothing_window_minutes);
-if isnan(smoothing_window_minutes)
-    smoothing_window_minutes = Inf;
+smoothing_window_seconds = str2double(out.smoothing_window_seconds);
+if isnan(smoothing_window_seconds)
+    smoothing_window_seconds = Inf;
 end
 
 if out.reject_by_enova
@@ -76,7 +76,7 @@ use_parallel = logical(out.parallel_processing);
 visualize_artifacts = logical(out.visualization_A);
 visualize_manifold = logical(out.visualize_manifold);
 
-[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold, [], visualize_manifold, smoothing_window_minutes);
+[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold, [], visualize_manifold, smoothing_window_seconds);
   
 EEG = eegh(com, EEG); % update EEG.history
     
