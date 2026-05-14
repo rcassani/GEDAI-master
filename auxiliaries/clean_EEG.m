@@ -31,7 +31,12 @@ log_Eig_val_all = log(magnitudes(magnitudes > 0)) + 100;
 
 %% Artifacting multiplication factor T1
 correction_factor = 1.00;
-T1 = correction_factor * (105 - artifact_threshold_in) / 100;
+
+if isscalar(artifact_threshold_in)
+    artifact_threshold_in = repmat(artifact_threshold_in, 1, num_epochs);
+end
+
+T1_array = correction_factor * (105 - artifact_threshold_in) / 100;
 
 %% Defining artifact threshold
 
@@ -42,7 +47,12 @@ T1 = correction_factor * (105 - artifact_threshold_in) / 100;
            percentile_threshold = 99;
     end
 
-Treshold1 = T1 * prctile(log_Eig_val_all,percentile_threshold);
+% Compute Treshold1 per epoch to match exactly how clean_SENSAI evaluates it:
+% SENSAI uses the GLOBAL percentile of ALL eigenvalues in the window it was
+% optimized on. We replicate that here by computing one percentile over ALL
+% eigenvalues (all channels × all epochs) and scaling per-epoch by T1_array.
+global_log_prctile = prctile(log_Eig_val_all, percentile_threshold);
+Treshold1_array = T1_array * global_log_prctile;
 
 
 %% Cleaning EEG by removing outlying GEVD components
@@ -59,11 +69,11 @@ for i = 1:num_epochs
     
     % --- OPTIMIZATION START ---
     % 1. Create a logical mask of indices to zero out
-    % This replaces the entire 'for j' loop with one line
-    bad_indices = abs(diag(Eval(:,:,i))) < exp(Treshold1 - 100);
+    % (We zero out the SIGNAL components to reconstruct the NOISE to subtract)
+    signal_indices = abs(diag(Eval(:,:,i))) < exp(Treshold1_array(i) - 100);
     
     % 2. Apply the mask (Vectorized)
-    component_spatial_filter(:, bad_indices) = 0;
+    component_spatial_filter(:, signal_indices) = 0;
     % --- OPTIMIZATION END ---
 
     artifacts_timecourses = component_spatial_filter' * EEGdata_epoched(:,:,i);    
