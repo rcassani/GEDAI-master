@@ -85,7 +85,7 @@ try
     lda_accuracy = (1 - kfoldLoss(lda_mdl)) * 100;
     lda_full     = fitcdiscr(X_lda, Y_lda);
     
-    % --- Signal Silhouette Score ---
+    % --- SSI Silhouette Score ---
     % User preference: Only sensitive to the Y-axis (SSI) separation.
     sil_scores   = silhouette(X_lda(:, 1), Y_lda, 'sqEuclidean');
     sil_signal   = mean(sil_scores(Y_lda == 1));
@@ -188,8 +188,8 @@ add_marginal_densities(ax1, {}, {}, {}, SSI_top_PCs, ttl1);
 
 % Panel 2 Marginals
 if ~isnan(sil_signal)
-    ttl2 = sprintf('After Denoising  |  Signal Silhouette Score: %.2f\nMean SSSI: %.2f   |   Mean NSSI: %.2f', ...
-                  sil_signal, mean(ssi_after), mean(ssi_artifacts));
+    ttl2 = sprintf('After Denoising  |  Mean SSSI: %.2f   |   Mean NSSI: %.2f\nSSI Silhouette Score: %.2f', ...
+                  mean(ssi_after), mean(ssi_artifacts), sil_signal);
 else
     ttl2 = sprintf('After Denoising\nMean SSSI: %.2f   |   Mean NSSI: %.2f', ...
                   mean(ssi_after), mean(ssi_artifacts));
