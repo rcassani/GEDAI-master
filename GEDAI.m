@@ -148,6 +148,16 @@ if strcmp(signal_type, 'eeg')
 elseif strcmp(signal_type, 'meg')
     disp([newline 'GEDAI denoising of '  channel_type ' : ' num2str(size(EEGin.data,1)) ' channels']);
 end  
+
+% -- Handle Epoched Data --
+is_epoched = false;
+if EEGin.trials > 1 && ndims(EEGin.data) == 3
+    is_epoched = true;
+    disp('Epoched data detected. Converting to continuous for GEDAI processing...');
+    original_EEG = EEGin; % Save to restore epoch structure later
+    EEGin = eeg_epoch2continuous(EEGin);
+end
+
 % -- Ensure epoch size results in an even number of samples (for broadband)
  broadband_epoch_size = 1; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
 if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
@@ -213,7 +223,8 @@ else
             end
             
             if any(chanidx == 0)
-                error('Electrode labels not found. Select "interpolated" leadfield matrix for non-standard locations.');
+                missing_labels = strjoin(electrodes_labels(chanidx == 0), ', ');
+                error(['Electrode labels not found: ' missing_labels '. Either remove them using ''Edit ->Select data'' or select the ''interpolated'' leadfield matrix for non-standard locations.']);
             end
             refCOV = L.leadfield4GEDAI.gram_matrix_avref(chanidx,chanidx);
 
@@ -918,4 +929,27 @@ end
 if exist('eegh', 'file')
     EEGclean = eegh(com, EEGclean);
 end
+
+% -- Restore Epoched Data Structure if needed --
+if is_epoched
+    if size(EEGclean.data, 2) == size(original_EEG.data, 2) * size(original_EEG.data, 3)
+        disp('Converting continuous data back to epoched structure...');
+        % Restore structure for clean
+        EEGclean_epoched = original_EEG;
+        EEGclean_epoched.data = reshape(EEGclean.data, size(EEGclean_epoched.data));
+        EEGclean_epoched.history = EEGclean.history;
+        if isfield(EEGclean, 'etc')
+            EEGclean_epoched.etc = EEGclean.etc;
+        end
+        EEGclean = EEGclean_epoched;
+        
+        % Restore structure for artifacts
+        EEGartifacts_epoched = original_EEG;
+        EEGartifacts_epoched.data = reshape(EEGartifacts.data, size(EEGartifacts_epoched.data));
+        EEGartifacts = EEGartifacts_epoched;
+    else
+        warning('Data length changed (e.g., due to epoch rejection). Cannot cleanly restore 3D structure. Returning data as continuous.');
+    end
+end
+
 end
