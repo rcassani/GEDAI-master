@@ -162,6 +162,7 @@ hFig = figure('KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); hold on; axis()
 hAxis = gca;
 hSlider = uicontrol('style','slider','KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); on_resize();
 set(hSlider, 'callback', @on_update);
+addlistener(hSlider, 'ContinuousValueChange', @(~,~) on_update());
 % jSlider = findjobj(hSlider);
 % jSlider.AdjustmentValueChangedCallback = @on_update;
 
@@ -244,20 +245,25 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         
         xrange = xl(1):(xl(2)-xl(1))/(length(wndindices)-1):xl(2);
         yoffset = repmat(channel_y,1,length(wndindices));
+        
+        % Fast plotting optimization: vectorize lines with NaN separators
+        insert_nans = @(Y) reshape([Y, NaN(size(Y,1),1)]', 1, []);
+        x_nan = insert_nans(repmat(xrange, size(oldwnd,1), 1));
+        
         switch opts.display_mode
             case 'both'
                 title([tit '; superposition'],'Interpreter','none');
-                h_old = plot(xrange, (yoffset + scale.*oldwnd)','Color',opts.oldcol,'LineWidth',opts.line_width(1));
-                h_new = plot(xrange, (yoffset + scale.*newwnd)','Color',opts.newcol,'LineWidth',opts.line_width(2));
+                h_old = plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
+                h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
             case 'new'
                 title([tit '; cleaned'],'Interpreter','none');
-                plot(xrange, (yoffset + scale.*newwnd)','Color',opts.newcol,'LineWidth',opts.line_width(2));
+                plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
             case 'old'
                 title([tit '; original'],'Interpreter','none');
-                plot(xrange, (yoffset + scale.*oldwnd)','Color',opts.oldcol,'LineWidth',opts.line_width(1));
+                plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
             case 'diff'
                 title([tit '; difference'],'Interpreter','none');
-                plot(xrange, (yoffset + scale.*(oldwnd-newwnd))','Color',opts.newcol,'LineWidth',opts.line_width(1));
+                plot(x_nan, insert_nans(yoffset + scale.*(oldwnd-newwnd)), 'Color',opts.newcol,'LineWidth',opts.line_width(1));
         end
         
         % also plot events
