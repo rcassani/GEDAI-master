@@ -93,8 +93,7 @@ try
     
     % --- SSI Silhouette Score ---
     % User preference: Only sensitive to the Y-axis (SSI) separation.
-    sil_scores   = silhouette(X_lda(:, 1), Y_lda, 'sqEuclidean');
-    sil_signal   = mean(sil_scores(Y_lda == 1));
+    sil_signal = custom_1d_silhouette(X_lda(:, 1), Y_lda, 1);
 catch
     lda_accuracy = NaN;
     lda_full     = [];
@@ -264,4 +263,32 @@ function add_marginal_densities(ax, x_data, y_data, cols, SSI_top_PCs, ttl)
         ax_y.XAxis.Visible = 'off'; ax_y.YAxis.Visible = 'off';
     end
     uistack(ax, 'top');
+end
+
+function sil_score = custom_1d_silhouette(x, y, target_class)
+    % Custom 1D silhouette calculation using sqEuclidean distance
+    idx_target = find(y == target_class);
+    idx_other = find(y ~= target_class);
+    n_target = length(idx_target);
+    n_other = length(idx_other);
+    
+    if n_target <= 1 || n_other == 0
+        sil_score = NaN;
+        return;
+    end
+    
+    x_target = x(idx_target);
+    x_other = x(idx_other);
+    sil_scores = zeros(n_target, 1);
+    
+    for i = 1:n_target
+        a_i = sum((x_target(i) - x_target).^2) / (n_target - 1);
+        b_i = sum((x_target(i) - x_other).^2) / n_other;
+        if max(a_i, b_i) == 0
+            sil_scores(i) = 0;
+        else
+            sil_scores(i) = (b_i - a_i) / max(a_i, b_i);
+        end
+    end
+    sil_score = mean(sil_scores);
 end
