@@ -265,10 +265,10 @@ set(hFig, 'ResizeFcn', @on_window_resized);
                     newwnd_good(good_chans,:) = newwnd(good_chans,:);
                     h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd_good), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
                     
-                    % Plot bad channels in red
+                    % Plot bad channels in magenta to distinguish from original red data
                     newwnd_bad = nan(size(newwnd));
                     newwnd_bad(bad_chans,:) = newwnd(bad_chans,:);
-                    plot(x_nan, insert_nans(yoffset + scale.*newwnd_bad), 'Color',[1 0 0],'LineWidth',opts.line_width(end));
+                    plot(x_nan, insert_nans(yoffset + scale.*newwnd_bad), 'Color',[1 0 1],'LineWidth',opts.line_width(end));
                 else
                     h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
                 end
