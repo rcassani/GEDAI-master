@@ -38,11 +38,18 @@ function COV_array = compute_cov_array(data)
         data = [data, padding];
     end
     num_epochs = size(data, 2) / epoch_samples;
-    COV_array = cell(num_epochs, 1);
-    for epo = 1:num_epochs
-        i_start = (epo - 1) * epoch_samples + 1;
-        i_end   = i_start + epoch_samples - 1;
-        COV_array{epo} = cov(data(:, i_start:i_end)');
+    num_chans = size(data, 1);
+    
+    data3D = reshape(data, num_chans, epoch_samples, num_epochs);
+    data3D = data3D - mean(data3D, 2); % Center data for covariance
+    
+    if exist('pagemtimes', 'builtin')
+        COV_array = pagemtimes(data3D, permute(data3D, [2 1 3])) / (epoch_samples - 1);
+    else
+        COV_array = zeros(num_chans, num_chans, num_epochs);
+        for epo = 1:num_epochs
+            COV_array(:,:,epo) = (data3D(:,:,epo) * data3D(:,:,epo)') / (epoch_samples - 1);
+        end
     end
 end
 
@@ -50,12 +57,12 @@ C_before    = compute_cov_array(EEGavRef.data);
 C_after     = compute_cov_array(EEGclean.data);
 C_artifacts = compute_cov_array(EEGartifacts.data);
 
-num_epochs_after = length(C_after);
-if length(C_before) > num_epochs_after
-    C_before = C_before(1:num_epochs_after);
-elseif length(C_before) < num_epochs_after
-    C_after = C_after(1:length(C_before));
-    C_artifacts = C_artifacts(1:length(C_before));
+num_epochs_after = size(C_after, 3);
+if size(C_before, 3) > num_epochs_after
+    C_before = C_before(:, :, 1:num_epochs_after);
+elseif size(C_before, 3) < num_epochs_after
+    C_after = C_after(:, :, 1:size(C_before, 3));
+    C_artifacts = C_artifacts(:, :, 1:size(C_before, 3));
 end
 
 %% ── 2. Subspace Analysis ───────────────────────────────────────────────
@@ -81,14 +88,12 @@ ideal_power_target = median(lpow_after);
 X_lda = [ssi_after, lpow_after; ssi_artifacts, lpow_artifacts];
 Y_lda = [ones(numel(ssi_after), 1); zeros(numel(ssi_artifacts), 1)];
 try
-    lda_mdl      = fitcdiscr(X_lda, Y_lda, 'CrossVal', 'on', 'KFold', 5);
-    lda_accuracy = (1 - kfoldLoss(lda_mdl)) * 100;
     lda_full     = fitcdiscr(X_lda, Y_lda);
+    lda_accuracy = (1 - resubLoss(lda_full)) * 100;
     
     % --- SSI Silhouette Score ---
     % User preference: Only sensitive to the Y-axis (SSI) separation.
-    sil_scores   = silhouette(X_lda(:, 1), Y_lda, 'sqEuclidean');
-    sil_signal   = mean(sil_scores(Y_lda == 1));
+    sil_signal = custom_1d_silhouette(X_lda(:, 1), Y_lda, 1);
 catch
     lda_accuracy = NaN;
     lda_full     = [];
@@ -211,17 +216,17 @@ end
 
 %% Helper Functions
 function angs = extract_angles(C_array, basis_ref, top_PCs)
-    n = length(C_array); angs = zeros(n, top_PCs);
+    n = size(C_array, 3); angs = zeros(n, top_PCs);
     for i = 1:n
-        [V, D] = eig(C_array{i}); [~, idx] = sort(diag(D), 'descend');
+        [V, D] = eig(C_array(:,:,i)); [~, idx] = sort(diag(D), 'descend');
         basis_c = V(:, idx(1:top_PCs));
         angs(i,:) = subspace_angles(basis_c, basis_ref)';
     end
 end
 
 function pow = extract_power(C_array)
-    n = length(C_array); pow = zeros(n, 1);
-    for i = 1:n, pow(i) = trace(C_array{i}); end
+    n = size(C_array, 3); pow = zeros(n, 1);
+    for i = 1:n, pow(i) = trace(C_array(:,:,i)); end
 end
 
 function draw_ellipse(ax, x, y, col, conf)
@@ -258,4 +263,32 @@ function add_marginal_densities(ax, x_data, y_data, cols, SSI_top_PCs, ttl)
         ax_y.XAxis.Visible = 'off'; ax_y.YAxis.Visible = 'off';
     end
     uistack(ax, 'top');
+end
+
+function sil_score = custom_1d_silhouette(x, y, target_class)
+    % Custom 1D silhouette calculation using sqEuclidean distance
+    idx_target = find(y == target_class);
+    idx_other = find(y ~= target_class);
+    n_target = length(idx_target);
+    n_other = length(idx_other);
+    
+    if n_target <= 1 || n_other == 0
+        sil_score = NaN;
+        return;
+    end
+    
+    x_target = x(idx_target);
+    x_other = x(idx_other);
+    sil_scores = zeros(n_target, 1);
+    
+    for i = 1:n_target
+        a_i = sum((x_target(i) - x_target).^2) / (n_target - 1);
+        b_i = sum((x_target(i) - x_other).^2) / n_other;
+        if max(a_i, b_i) == 0
+            sil_scores(i) = 0;
+        else
+            sil_scores(i) = (b_i - a_i) / max(a_i, b_i);
+        end
+    end
+    sil_score = mean(sil_scores);
 end
