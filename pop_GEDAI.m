@@ -20,7 +20,8 @@ function [EEG, com] = pop_GEDAI(EEG, varargin)
 artifact_threshold = 'auto';
 epoch_size_in_cycles = 12;
 lowcut_frequency = 0.5;
-ENOVA_threshold = 0.9;
+ENOVA_threshold_per_epoch = 0.9;
+ENOVA_threshold_per_channel = 0.9;
 smoothing_window_seconds_default = Inf;
 
 % Create an inputParser to handle varargin
@@ -38,15 +39,17 @@ uilist = { ...
     {'style' 'text' 'string' 'Low-cut frequency (Hz)'} {'style' 'edit' 'string' num2str(lowcut_frequency) 'tag' 'lowcut_frequency'} ...
     {'style' 'text' 'string' 'Sliding window (in seconds, Inf=whole file)'} {'style' 'edit' 'string' num2str(smoothing_window_seconds_default) 'tag' 'smoothing_window_seconds'} ...
     {} ...
-    {'style' 'text' 'string' 'Reject bad epochs:'} {'style' 'checkbox' 'string' '' 'tag' 'reject_by_enova' 'value' 0}, ...
-    {'style' 'text' 'string' 'ENOVA Threshold (0-1)'} {'style' 'edit' 'string' num2str(ENOVA_threshold) 'tag' 'ENOVA_threshold'}, ...
+    {'style' 'text' 'string' 'Reject bad epochs:'} {'style' 'checkbox' 'string' '' 'tag' 'reject_epochs_by_enova' 'value' 0}, ...
+    {'style' 'text' 'string' 'Epoch ENOVA Threshold (0-1)'} {'style' 'edit' 'string' num2str(ENOVA_threshold_per_epoch) 'tag' 'ENOVA_threshold_per_epoch'}, ...
+    {} ...
+    {'style' 'text' 'string' 'Reject bad channels:'} {'style' 'checkbox' 'string' '' 'tag' 'reject_channels_by_enova' 'value' 0}, ...
+    {'style' 'text' 'string' 'Channel ENOVA Threshold (0-1)'} {'style' 'edit' 'string' num2str(ENOVA_threshold_per_channel) 'tag' 'ENOVA_threshold_per_channel'}, ...
     {} ...
     {'style' 'text' 'string' 'Parallel processing ( > RAM):'} {'style' 'checkbox' 'string' '' 'tag' 'parallel_processing' 'Value' 1}, ...
-    {'style' 'text' 'string' 'Artifact visualization (from ASR):'} {'style' 'checkbox' 'string' '' 'tag' 'visualization_A' 'Value' 1}, ...
-    {'style' 'text' 'string' 'SENSAI visualization:'} {'style' 'checkbox' 'string' '' 'tag' 'visualize_manifold' 'Value' 1}, ...
+    {'style' 'text' 'string' 'Artifact visualization:'} {'style' 'checkbox' 'string' '' 'tag' 'visualization_A' 'Value' 1}, ...
 };
-geometry = { [1, 1] [1, 1] [1, 1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1, 1] };
-title = '  GEDAI denoising |  v1.6  ';
+geometry = { [1, 1] [1, 1] [1, 1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1, 1] };
+title = '  GEDAI denoising toolbox |  v1.7  ';
 
 % Get user input
 [userInput, ~, ~, out] = inputgui( geometry, uilist, 'help(''GEDAI'')', title);
@@ -66,17 +69,22 @@ if isnan(smoothing_window_seconds)
     smoothing_window_seconds = Inf;
 end
 
-if out.reject_by_enova
-    ENOVA_threshold = str2double(out.ENOVA_threshold);
+if out.reject_epochs_by_enova
+    ENOVA_threshold_per_epoch = str2double(out.ENOVA_threshold_per_epoch);
 else
-    ENOVA_threshold = [];
+    ENOVA_threshold_per_epoch = [];
+end
+
+if out.reject_channels_by_enova
+    ENOVA_threshold_per_channel = str2double(out.ENOVA_threshold_per_channel);
+else
+    ENOVA_threshold_per_channel = [];
 end
 
 use_parallel = logical(out.parallel_processing);
 visualize_artifacts = logical(out.visualization_A);
-visualize_manifold = logical(out.visualize_manifold);
 
-[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold, [], visualize_manifold, smoothing_window_seconds);
+[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, [], smoothing_window_seconds);
   
 EEG = eegh(com, EEG); % update EEG.history
     
