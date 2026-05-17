@@ -365,7 +365,7 @@ if EEGin.trials > 1 && ndims(EEGin.data) == 3
 end
 
 % -- Ensure epoch size results in an even number of samples (for broadband)
- broadband_epoch_size = 1; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
+ broadband_epoch_size = 2; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
 if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
     ideal_total_samples_double = broadband_epoch_size * EEGin.srate;
     nearest_integer_samples = round(ideal_total_samples_double);
@@ -599,7 +599,7 @@ end
     disp([newline 'SENSAI threshold detection...please wait']);
     broadband_optimization_type = 'parabolic';
     broadband_artifact_threshold_type = 'auto-';
-    broadband_minThreshold = 0;
+    broadband_minThreshold = -2;
     broadband_maxThreshold = 12;
     [cleaned_broadband_data, ~, broadband_sensai, broadband_thresh, broadband_ENOVA] = GEDAI_per_band(double(EEGavRef.data), EEGavRef.srate, EEGavRef.chanlocs, broadband_artifact_threshold_type, broadband_epoch_size, refCOV, broadband_optimization_type, parallel, signal_type, broadband_minThreshold, broadband_maxThreshold, smoothing_window_seconds);
     SENSAI_score_per_band = broadband_sensai;
