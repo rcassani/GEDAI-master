@@ -84,7 +84,7 @@ end
 use_parallel = logical(out.parallel_processing);
 visualize_artifacts = logical(out.visualization_A);
 
-[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, [], visualize_artifacts, smoothing_window_seconds);
+[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, [], smoothing_window_seconds);
   
 EEG = eegh(com, EEG); % update EEG.history
     
