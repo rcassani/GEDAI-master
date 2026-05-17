@@ -104,7 +104,7 @@
 % For any questions, please contact:
 % dr.t.ros@gmail.com
 
-function [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band]=GEDAI(EEGin, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, signal_type, visualize_manifold, smoothing_window_seconds)
+function [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band, ENOVA_per_channel]=GEDAI(EEGin, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, signal_type, visualize_manifold, smoothing_window_seconds, precomputed_ENOVA_per_epoch)
 
 if nargin < 2 || isempty(artifact_threshold_type)
     artifact_threshold_type = 'auto';
@@ -190,12 +190,7 @@ if ENOVA_threshold_per_channel < inf
     
     % Run GEDAI with channel rejection disabled (inf) to identify bad channels
     % Also disable epoch rejection in pass 1 so channel variance isn't computed on incomplete data
-    [EEGclean_p1, EEGartifacts_p1] = GEDAI(EEG_p1, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_p1, parallel, false, inf, inf, signal_type, false, smoothing_window_seconds);
-    
-    % Calculate ENOVA per channel
-    var_artifacts_per_channel = var(EEGartifacts_p1.data, 0, 2);
-    var_original_per_channel = var(EEGclean_p1.data + EEGartifacts_p1.data, 0, 2);
-    ENOVA_per_channel_val_p1 = var_artifacts_per_channel ./ var_original_per_channel;
+    [~, ~, ~, ~, ~, mean_ENOVA_p1, ENOVA_per_epoch_p1, ~, ~, ENOVA_per_channel_val_p1] = GEDAI(EEG_p1, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_p1, parallel, false, inf, inf, signal_type, false, smoothing_window_seconds);
     
     clear EEGclean_p1 EEGartifacts_p1; % Free memory
     
@@ -233,26 +228,50 @@ if ENOVA_threshold_per_channel < inf
         end
         
         % --- PASS 2 ---
-        disp([newline '--- PASS 2: Processing reduced data ---']);
+        disp([newline '--- PASS 2: Processing reduced data with global epoch thresholds ---']);
         [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band] = ...
-            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, visualize_manifold, smoothing_window_seconds);
+            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, visualize_manifold, smoothing_window_seconds, ENOVA_per_epoch_p1);
         
         % --- INTERPOLATION ---
         disp([newline '--- INTERPOLATING BAD CHANNELS ---']);
         % Use EEGLAB's eeg_interp to interpolate missing channels back to the original montage
         EEGclean = eeg_interp(EEGclean, EEGin.chanlocs, 'spherical');
-        EEGartifacts = eeg_interp(EEGartifacts, EEGin.chanlocs, 'spherical');
+        
+        % Reconstruct true EEGartifacts to perfectly preserve the fundamental invariant: original = clean + artifacts
+        EEGartifacts = EEGclean;
+        if isfield(EEGclean.etc, 'GEDAI') && isfield(EEGclean.etc.GEDAI, 'samples_to_keep')
+            kept_samples = EEGclean.etc.GEDAI.samples_to_keep;
+            original_data_kept = EEGin.data(:, kept_samples);
+        else
+            original_data_kept = EEGin.data;
+        end
+        EEGartifacts.data = original_data_kept - EEGclean.data;
         
         % Re-apply average reference after interpolation for EEG
         if strcmp(signal_type, 'eeg')
             disp('Re-applying average reference after interpolation...');
             EEGclean = GEDAI_nonRankDeficientAveRef(EEGclean);
             EEGartifacts = GEDAI_nonRankDeficientAveRef(EEGartifacts);
+            % Update invariant reference for ENOVA calculation
+            original_data_kept = EEGclean.data + EEGartifacts.data;
         end
+        
+        % Because epoch rejection permanently shortens the dataset, we cannot recalculate
+        % the global mean ENOVA on the final output without mathematically losing the 
+        % massive variance of the rejected bad epochs.
+        % However, Pass 1 evaluated the full-topology global noise profile
+        % perfectly across all channels and epochs BEFORE any data was discarded!
+        mean_ENOVA = mean_ENOVA_p1;
         
         % Store the channel ENOVA and removed channels
         EEGclean.etc.GEDAI.ENOVA_per_channel = ENOVA_per_channel_val;
         EEGclean.etc.GEDAI.bad_channels_removed = channels_to_remove;
+        EEGclean.etc.GEDAI.mean_ENOVA = mean_ENOVA;
+        
+        disp([newline '==================================================']);
+        disp('GEDAI TWO-PASS MODE: Final Global Statistics');
+        disp('==================================================');
+        disp(['Global Mean ENOVA (Total Artifact Variance Removed): ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
         
         ENOVA_per_channel = ENOVA_per_channel_val; % Provide output variable
         
@@ -270,12 +289,9 @@ if ENOVA_threshold_per_channel < inf
         if visualize_artifacts
             EEGclean_for_vis = EEGclean;
             if isfield(EEGclean.etc, 'GEDAI') && isfield(EEGclean.etc.GEDAI, 'samples_to_keep')
-                clean_sample_mask = EEGclean.etc.GEDAI.samples_to_keep;
-                EEGclean_for_vis.data = EEGclean_for_vis.data(:, clean_sample_mask);
-                EEGclean_for_vis.pnts = size(EEGclean_for_vis.data, 2);
+                EEGclean_for_vis.etc.clean_sample_mask = EEGclean.etc.GEDAI.samples_to_keep;
             end
-            % ShowRemovedPortions false prevents expand_rejections from masking interpolated channels
-            vis_artifacts(EEGclean_for_vis, EEGin, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGin.data(:)), 'ShowRemovedPortions', false);
+            vis_artifacts(EEGclean_for_vis, EEGin, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGin.data(:)));
         end
         
         return; % End here for two-pass
@@ -775,15 +791,42 @@ EEGartifacts.data = EEGavRef.data(:, 1:size(EEGclean.data, 2)) - EEGclean.data;
 
 % Calculate composite SENSAI score for epoch rejection
 noise_multiplier = 1;
-[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, broadband_epoch_size, refCOV, noise_multiplier, signal_type);
+[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch_internal] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, broadband_epoch_size, refCOV, noise_multiplier, signal_type);
+
+if nargin >= 13 && ~isempty(precomputed_ENOVA_per_epoch)
+    ENOVA_per_epoch = precomputed_ENOVA_per_epoch;
+else
+    ENOVA_per_epoch = ENOVA_per_epoch_internal;
+end
 
 % Store original epoch count for rejection statistics
 original_total_epochs = length(ENOVA_per_epoch);
 
-% Calculate ENOVA per channel
-var_artifacts_per_channel = var(EEGartifacts.data, 0, 2);
-var_original_per_channel = var(EEGavRef.data(:, 1:size(EEGclean.data, 2)), 0, 2);
-ENOVA_per_channel = var_artifacts_per_channel ./ var_original_per_channel;
+% Calculate ENOVA per channel as a mean across epochs
+epoch_samples = round(broadband_epoch_size * EEGavRef.srate);
+pnts_total = size(EEGclean.data, 2);
+num_epochs_ch = floor(pnts_total / epoch_samples);
+
+if num_epochs_ch > 0
+    new_length = num_epochs_ch * epoch_samples;
+    orig_data_trunc = EEGavRef.data(:, 1:new_length);
+    noise_data_trunc = EEGartifacts.data(:, 1:new_length);
+    
+    orig_epoched = reshape(orig_data_trunc, size(orig_data_trunc, 1), epoch_samples, []);
+    noise_epoched = reshape(noise_data_trunc, size(noise_data_trunc, 1), epoch_samples, []);
+    
+    enova_ch_epochs = zeros(size(orig_data_trunc, 1), num_epochs_ch);
+    for ep = 1:num_epochs_ch
+        var_orig = var(orig_epoched(:,:,ep), 0, 2);
+        var_noise = var(noise_epoched(:,:,ep), 0, 2);
+        enova_ch_epochs(:, ep) = var_noise ./ var_orig;
+    end
+    ENOVA_per_channel = mean(enova_ch_epochs, 2);
+else
+    var_artifacts_per_channel = var(EEGartifacts.data, 0, 2);
+    var_original_per_channel = var(EEGavRef.data(:, 1:size(EEGclean.data, 2)), 0, 2);
+    ENOVA_per_channel = var_artifacts_per_channel ./ var_original_per_channel;
+end
 
 epochs_to_remove = find(ENOVA_per_epoch > ENOVA_threshold_per_epoch);
 regions = [];
