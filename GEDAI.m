@@ -324,15 +324,8 @@ EEGin.data=double(EEGin.data);
 if strcmp(signal_type, 'eeg')
     % Check if data is already average referenced (Standard or via EEGLAB metadata)
     is_standard_avg_ref = max(abs(mean(EEGin.data, 1))) < 1e-5;
-    
-    is_eeglab_avg_ref = false;
-    if isfield(EEGin, 'ref') && ischar(EEGin.ref) && strcmpi(EEGin.ref, 'average')
-        is_eeglab_avg_ref = true;
-    elseif isfield(EEGin, 'chanlocs') && isfield(EEGin.chanlocs, 'ref') && ~isempty(EEGin.chanlocs) && ischar(EEGin.chanlocs(1).ref) && any(strcmpi({EEGin.chanlocs.ref}, 'average'))
-        is_eeglab_avg_ref = true;
-    end
-    
-    if is_standard_avg_ref || is_eeglab_avg_ref
+       
+    if is_standard_avg_ref 
         disp([newline 'Data is already average referenced. Skipping internal average referencing.']);
         EEGavRef = EEGin;
     else
