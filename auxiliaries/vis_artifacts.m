@@ -254,7 +254,24 @@ set(hFig, 'ResizeFcn', @on_window_resized);
             case 'both'
                 title([tit '; superposition'],'Interpreter','none');
                 h_old = plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
-                h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                
+                % Check for bad channels to highlight in red
+                if isfield(new, 'etc') && isfield(new.etc, 'GEDAI') && isfield(new.etc.GEDAI, 'bad_channels_removed') && ~isempty(new.etc.GEDAI.bad_channels_removed)
+                    bad_chans = new.etc.GEDAI.bad_channels_removed;
+                    good_chans = setdiff(1:size(newwnd,1), bad_chans);
+                    
+                    % Plot good channels in newcol
+                    newwnd_good = nan(size(newwnd));
+                    newwnd_good(good_chans,:) = newwnd(good_chans,:);
+                    h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd_good), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                    
+                    % Plot bad channels in red
+                    newwnd_bad = nan(size(newwnd));
+                    newwnd_bad(bad_chans,:) = newwnd(bad_chans,:);
+                    plot(x_nan, insert_nans(yoffset + scale.*newwnd_bad), 'Color',[1 0 0],'LineWidth',opts.line_width(end));
+                else
+                    h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                end
             case 'new'
                 title([tit '; cleaned'],'Interpreter','none');
                 plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
@@ -401,10 +418,10 @@ end
 function map = gen_colormap(eventstruct,mapname)
 map.keys = unique({eventstruct.type});
 if isscalar(map.keys)
-    tmp = colormap(mapname);
+    tmp = feval(mapname, 256);
     map.values = tmp(round(end/2),:);
 elseif ~isempty(map.keys)
-    tmp = colormap(mapname);
+    tmp = feval(mapname, 256);
     map.values = tmp(1+floor((0:length(map.keys)-1)/(length(map.keys)-1)*(length(tmp)-1)),:);
 else
     map.values = [];
