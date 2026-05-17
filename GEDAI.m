@@ -571,7 +571,15 @@ end
 % MEMORY OPTIMIZED: Use incremental band processing instead of full decomposition
 unfiltered_data = cleaned_broadband_data';
 wavelet_type = 'haar';
-number_of_wavelet_bands = 9; % Default number of wavelet bands = 9
+
+% Calculate required number of wavelet levels to isolate lowcut_frequency
+% We need: srate / 2^number_of_wavelet_bands <= lowcut_frequency
+number_of_wavelet_bands = ceil(log2(EEGavRef.srate / lowcut_frequency));
+% Limit to maximum possible level given data length
+max_possible_level = floor(log2(size(EEGavRef.data, 2)));
+number_of_wavelet_bands = min(number_of_wavelet_bands, max_possible_level);
+% Ensure reasonable minimum
+number_of_wavelet_bands = max(number_of_wavelet_bands, 6);
 
 % OPTIMIZATION: Eliminated full wpt_EEG storage - bands will be extracted incrementally
 number_of_discrete_wavelet_bands = number_of_wavelet_bands;
