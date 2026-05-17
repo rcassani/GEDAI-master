@@ -297,6 +297,42 @@ if ENOVA_threshold_per_channel < inf
                 EEGclean_for_vis.etc.clean_sample_mask = EEGclean.etc.GEDAI.samples_to_keep;
             end
             vis_artifacts(EEGclean_for_vis, EEGin, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGin.data(:)));
+            
+            % Plot sliding thresholds if applicable
+            if smoothing_window_seconds ~= Inf && isfield(EEGclean.etc.GEDAI, 'artifact_threshold_array_per_band')
+                plot_title = ['GEDAI Sliding Thresholds (' artifact_threshold_type ' | Window: ' num2str(smoothing_window_seconds) ' s | SENSAI: ' num2str(round(SENSAI_score, 1)) '%)'];
+                figure('Color', 'w', 'Name', plot_title);
+                num_plots = length(EEGclean.etc.GEDAI.artifact_threshold_array_per_band);
+                
+                num_cols = min(num_plots, 3);
+                num_rows = ceil(num_plots / num_cols);
+                tiledlayout(num_rows, num_cols, 'TileSpacing', 'compact', 'Padding', 'compact');
+                sgtitle(plot_title, 'FontSize', 12, 'FontWeight', 'bold');
+                
+                band_colors = turbo(max(num_plots, 1));
+                for i = 1:num_plots
+                    nexttile;
+                    thresh_array = EEGclean.etc.GEDAI.artifact_threshold_array_per_band{i};
+                    
+                    if i == 1
+                        current_epoch_size = EEGclean.etc.GEDAI.broadband_epoch_size;
+                    else
+                        current_epoch_size = EEGclean.etc.GEDAI.epoch_sizes_per_wavelet_band(i-1);
+                    end
+                    
+                    time_axis_minutes = (1:length(thresh_array)) * current_epoch_size / 60;
+                    plot(time_axis_minutes, thresh_array, '-', 'Color', band_colors(i,:), 'LineWidth', 2);
+                    
+                    title(EEGclean.etc.GEDAI.freq_str_cell{i}, 'FontSize', 12);
+                    
+                    if i > num_plots - num_cols
+                        xlabel('Time (Minutes)', 'FontSize', 10);
+                    end
+                    ylabel('Threshold', 'FontSize', 10);
+                    grid on;
+                    ylim([-1.9, 10]);
+                end
+            end
         end
         
         return; % End here for two-pass
@@ -1109,6 +1145,9 @@ EEGclean.etc.GEDAI.SENSAI_score = SENSAI_score;
 EEGclean.etc.GEDAI.SENSAI_score_per_band = SENSAI_score_per_band;
 EEGclean.etc.GEDAI.artifact_threshold_per_band = artifact_threshold_per_band;
 EEGclean.etc.GEDAI.artifact_threshold_array_per_band = artifact_threshold_array_per_band;
+EEGclean.etc.GEDAI.freq_str_cell = freq_str_cell;
+EEGclean.etc.GEDAI.epoch_sizes_per_wavelet_band = epoch_sizes_per_wavelet_band;
+EEGclean.etc.GEDAI.broadband_epoch_size = broadband_epoch_size;
 EEGclean.etc.GEDAI.mean_ENOVA = mean_ENOVA;
 EEGclean.etc.GEDAI.ENOVA_per_band = ENOVA_per_band;
 EEGclean.etc.GEDAI.ENOVA_per_epoch = ENOVA_per_epoch;
