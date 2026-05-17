@@ -49,7 +49,7 @@ uilist = { ...
     {'style' 'text' 'string' 'SENSAI visualization:'} {'style' 'checkbox' 'string' '' 'tag' 'visualize_manifold' 'Value' 1}, ...
 };
 geometry = { [1, 1] [1, 1] [1, 1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1, 1] };
-title = '  GEDAI denoising |  v1.6  ';
+title = '  GEDAI denoising toolbox |  v1.7  ';
 
 % Get user input
 [userInput, ~, ~, out] = inputgui( geometry, uilist, 'help(''GEDAI'')', title);

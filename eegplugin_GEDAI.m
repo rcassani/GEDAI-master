@@ -15,7 +15,7 @@
 
 function vers=eegplugin_GEDAI(fig, try_strings, catch_strings)
 % version
-vers = 'GEDAI v1.6 - April 2026';
+vers = 'GEDAI v1.7 - May 2026';
 
 g = fileparts(which('eegplugin_GEDAI'));
 addpath(fullfile(g, 'auxiliaries'));
