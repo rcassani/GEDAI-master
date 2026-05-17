@@ -66,6 +66,10 @@
 %   signal_type                 - Type of signal: 'eeg' or 'meg'. Default is 'eeg'.
 %                                 For EEG, average referencing is applied.
 %                                 For MEG, average referencing is skipped.
+%
+%   smoothing_window_seconds    - Window size (in seconds) for sliding threshold adaptation 
+%                                 to account for signal non-stationarities over time. 
+%                                 Set to Inf (default) to use a fixed global threshold.
 %    
 % Outputs:
 % 
@@ -104,7 +108,7 @@
 % For any questions, please contact:
 % dr.t.ros@gmail.com
 
-function [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band, ENOVA_per_channel]=GEDAI(EEGin, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, signal_type, visualize_manifold, smoothing_window_seconds, precomputed_ENOVA_per_epoch)
+function [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band, ENOVA_per_channel]=GEDAI(EEGin, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, signal_type, smoothing_window_seconds, varargin)
 
 if nargin < 2 || isempty(artifact_threshold_type)
     artifact_threshold_type = 'auto';
@@ -129,6 +133,12 @@ if nargin < 8 || isempty(ENOVA_threshold_per_epoch)
 end
 if nargin < 9 || isempty(ENOVA_threshold_per_channel)
     ENOVA_threshold_per_channel = inf; % If empty, set to infinity to disable rejection
+end
+
+% Parse hidden internal argument (precomputed_ENOVA_per_epoch) for Pass 2 recursion
+precomputed_ENOVA_per_epoch = [];
+if ~isempty(varargin)
+    precomputed_ENOVA_per_epoch = varargin{1};
 end
 if nargin < 10 || isempty(signal_type)
     signal_type = 'eeg';
@@ -230,7 +240,7 @@ if ENOVA_threshold_per_channel < inf
         % --- PASS 2 ---
         disp([newline '--- PASS 2: Processing reduced data with global epoch thresholds ---']);
         [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band] = ...
-            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, visualize_manifold, smoothing_window_seconds, ENOVA_per_epoch_p1);
+            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, smoothing_window_seconds, ENOVA_per_epoch_p1);
         
         % --- INTERPOLATION ---
         disp([newline '--- INTERPOLATING BAD CHANNELS ---']);
@@ -842,7 +852,7 @@ EEGartifacts.data = EEGavRef.data(:, 1:size(EEGclean.data, 2)) - EEGclean.data;
 noise_multiplier = 1;
 [SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch_internal] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, broadband_epoch_size, refCOV, noise_multiplier, signal_type);
 
-if nargin >= 13 && ~isempty(precomputed_ENOVA_per_epoch)
+if ~isempty(precomputed_ENOVA_per_epoch)
     ENOVA_per_epoch = precomputed_ENOVA_per_epoch;
 else
     ENOVA_per_epoch = ENOVA_per_epoch_internal;
@@ -1167,7 +1177,7 @@ end
 
     % --- Manifold Classification (Broadband) BEFORE & AFTER Cleaning ---
     % Uses 50% overlapping 1-second epochs for denser coverage in the scatter plot
-    if visualize_manifold && ~isempty(refCOV)
+    if visualize_artifacts && ~isempty(refCOV)
         % Ensure visualization uses the same PC count as the SENSAI scoring logic
         if strcmpi(signal_type, 'meg'), vis_pcs = 4; else, vis_pcs = 3; end
         
