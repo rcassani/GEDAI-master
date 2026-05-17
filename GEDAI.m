@@ -143,10 +143,7 @@ end
 if nargin < 10 || isempty(signal_type)
     signal_type = 'eeg';
 end
-if nargin < 11 || isempty(visualize_manifold)
-    visualize_manifold = false;
-end
-if nargin < 12 || isempty(smoothing_window_seconds)
+if nargin < 11 || isempty(smoothing_window_seconds)
     smoothing_window_seconds = Inf; % default: use whole file (no sliding window)
 end
 % Validate signal_type
