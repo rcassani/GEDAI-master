@@ -154,7 +154,7 @@ tStart = tic;
 % =========================================================================
 if ENOVA_threshold_per_channel < inf
     disp([newline '==================================================']);
-    disp('GEDAI TWO-PASS MODE: Identifying and excluding bad channels');
+    disp('GEDAI BAD-CHANNEL REJECTION MODE: Identifying and excluding bad channels');
     disp('==================================================');
     
     % --- PRE-PASS: Flat Channel Identification ---
@@ -269,9 +269,14 @@ if ENOVA_threshold_per_channel < inf
         EEGclean.etc.GEDAI.mean_ENOVA = mean_ENOVA;
         
         disp([newline '==================================================']);
-        disp('GEDAI TWO-PASS MODE: Final Global Statistics');
+        disp('GEDAI BAD-CHANNEL REJECTION MODE: Final Global Statistics');
         disp('==================================================');
-        disp(['Global Mean ENOVA (Total Artifact Variance Removed): ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
+        disp(['Global SENSAI Score: ' num2str(round(SENSAI_score, 1)) ' %']);
+        disp(['Global Mean ENOVA: ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
+        disp(['Bad channels rejected: ' num2str(length(channels_to_remove)) ' (' num2str(round(length(channels_to_remove)/size(EEGin.data,1)*100, 1)) ' %)']);
+        if isfield(EEGclean.etc, 'GEDAI') && isfield(EEGclean.etc.GEDAI, 'epochs_rejected')
+            disp(['Bad epochs rejected: ' num2str(round(EEGclean.etc.GEDAI.percentage_rejected, 1)) ' % (' num2str(EEGclean.etc.GEDAI.epochs_rejected) ' out of ' num2str(EEGclean.etc.GEDAI.total_epochs) ' epochs)']);
+        end
         
         ENOVA_per_channel = ENOVA_per_channel_val; % Provide output variable
         
