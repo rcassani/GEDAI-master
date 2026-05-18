@@ -365,7 +365,7 @@ if EEGin.trials > 1 && ndims(EEGin.data) == 3
 end
 
 % -- Ensure epoch size results in an even number of samples (for broadband)
- broadband_epoch_size = 1; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
+ broadband_epoch_size = 2; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
 if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
     ideal_total_samples_double = broadband_epoch_size * EEGin.srate;
     nearest_integer_samples = round(ideal_total_samples_double);
@@ -657,7 +657,7 @@ if num_bands_to_process > 0
     required_samples = epoch_size_lowest_band * srate;
 
     while required_samples > size(EEGavRef.data, 2) && num_bands_to_process > 0
-        warning('GEDAI:InsufficientData', 'EEG data length is too short for the epoch size required by the lowest frequency band (%g Hz). Increasing lowcut_frequency.', center_frequencies(lowest_band_to_process_idx));
+        warning('GEDAI:InsufficientData', 'EEG data length is too short for the epoch size required by the lowest frequency band (%g Hz). Increasing lowcut_frequency.', lower_frequencies(lowest_band_to_process_idx));
         lowcut_frequency = upper_frequencies(lowest_band_to_process_idx);
         lowest_wavelet_bands_to_exclude = sum(upper_frequencies <= lowcut_frequency);
         num_bands_to_process = number_of_discrete_wavelet_bands - lowest_wavelet_bands_to_exclude;
@@ -676,9 +676,9 @@ epoch_sizes_per_wavelet_band = epoch_size_in_cycles ./ lower_frequencies;
 % --- Display wavelet band-widths and epoch sizes ---
 % disp(' ');  
 left_margin = '  '; 
-header1 = 'Wavelet Center Freq (Hz)';
+header1 = 'Wavelet Lower Freq (Hz)';
 header2 = 'Epoch Size (s)';
-str_freqs = num2str(center_frequencies(1:num_bands_to_process)', '%.2g');
+str_freqs = num2str(lower_frequencies(1:num_bands_to_process)', '%.2g');
 str_epochs = num2str(epoch_sizes_per_wavelet_band(1:num_bands_to_process)', '%.2g');
 col1_width = max(length(header1), size(str_freqs, 2));
 col2_width = max(length(header2), size(str_epochs, 2));
@@ -1050,7 +1050,7 @@ end
 % --- Summarized Output Table (including ENOVA) ---
 disp(' '); 
 left_margin = '  '; 
-header1 = 'Wavelet Center Freq (Hz)';
+header1 = 'Wavelet Lower Freq (Hz)';
 header2 = 'Epoch Size (s)';
 header3 = 'ENOVA (%)';
 
@@ -1060,7 +1060,7 @@ header3 = 'ENOVA (%)';
 freq_str_cell = cell(1, num_bands_to_process + 1);
 freq_str_cell{1} = 'Broadband';
 for i = 1:num_bands_to_process
-    freq_str_cell{i+1} = [num2str(center_frequencies(i), '%.2g') ' Hz'];
+    freq_str_cell{i+1} = [num2str(lower_frequencies(i), '%.2g') ' Hz'];
 end
 
 epoch_str_cell = cell(1, num_bands_to_process + 1);
