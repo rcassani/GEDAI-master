@@ -365,7 +365,7 @@ if EEGin.trials > 1 && ndims(EEGin.data) == 3
 end
 
 % -- Ensure epoch size results in an even number of samples (for broadband)
- broadband_epoch_size = 3; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
+ broadband_epoch_size = 1; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
 if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
     ideal_total_samples_double = broadband_epoch_size * EEGin.srate;
     nearest_integer_samples = round(ideal_total_samples_double);
@@ -847,7 +847,8 @@ EEGartifacts.data = EEGavRef.data(:, 1:size(EEGclean.data, 2)) - EEGclean.data;
 
 % Calculate composite SENSAI score for epoch rejection
 noise_multiplier = 1;
-[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch_internal] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, broadband_epoch_size, refCOV, noise_multiplier, signal_type);
+sensai_epoch_size = 1;
+[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch_internal] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, sensai_epoch_size, refCOV, noise_multiplier, signal_type);
 
 if ~isempty(precomputed_ENOVA_per_epoch)
     ENOVA_per_epoch = precomputed_ENOVA_per_epoch;
@@ -859,7 +860,7 @@ end
 original_total_epochs = length(ENOVA_per_epoch);
 
 % Calculate ENOVA per channel as a mean across epochs
-epoch_samples = round(broadband_epoch_size * EEGavRef.srate);
+epoch_samples = round(sensai_epoch_size * EEGavRef.srate);
 pnts_total = size(EEGclean.data, 2);
 num_epochs_ch = floor(pnts_total / epoch_samples);
 
@@ -887,7 +888,7 @@ end
 epochs_to_remove = find(ENOVA_per_epoch > ENOVA_threshold_per_epoch);
 regions = [];
 if ~isempty(epochs_to_remove)
-    epoch_samples = round(broadband_epoch_size * EEGavRef.srate);
+    epoch_samples = round(sensai_epoch_size * EEGavRef.srate);
     regions = zeros(length(epochs_to_remove), 2);
     for i = 1:length(epochs_to_remove)
         epoch = epochs_to_remove(i);
@@ -1165,7 +1166,7 @@ EEGclean.etc.GEDAI.percentage_rejected = percentage_rejected;
 if exist('samples_to_keep', 'var')
     EEGclean.etc.GEDAI.samples_to_keep = samples_to_keep;
 else
-    EEGclean.etc.GEDAI.samples_to_keep = true(1, original_total_epochs * round(broadband_epoch_size * EEGavRef.srate)); 
+    EEGclean.etc.GEDAI.samples_to_keep = true(1, original_total_epochs * round(sensai_epoch_size * EEGavRef.srate)); 
     % Note: The above calculation might be slightly off if rounding happened differently for 'pnts'.
     % Safer to use current pnts if no rejection happened:
     EEGclean.etc.GEDAI.samples_to_keep = true(1, size(EEGclean.data, 2));
@@ -1178,7 +1179,7 @@ end
         % Ensure visualization uses the same PC count as the SENSAI scoring logic
         if strcmpi(signal_type, 'meg'), vis_pcs = 4; else, vis_pcs = 3; end
         
-        visualization_metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, refCOV, broadband_epoch_size, signal_type, vis_pcs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score);
+        visualization_metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, refCOV, sensai_epoch_size, signal_type, vis_pcs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score);
         
         % Store metrics in EEG.etc.GEDAI
         EEGclean.etc.GEDAI.visualization_metrics = visualization_metrics;
