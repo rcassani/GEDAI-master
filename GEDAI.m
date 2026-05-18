@@ -365,7 +365,7 @@ if EEGin.trials > 1 && ndims(EEGin.data) == 3
 end
 
 % -- Ensure epoch size results in an even number of samples (for broadband)
- broadband_epoch_size = 1; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
+ broadband_epoch_size = 2; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
 if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
     ideal_total_samples_double = broadband_epoch_size * EEGin.srate;
     nearest_integer_samples = round(ideal_total_samples_double);
@@ -599,7 +599,7 @@ end
     disp([newline 'SENSAI threshold detection...please wait']);
     broadband_optimization_type = 'parabolic';
     broadband_artifact_threshold_type = 'auto-';
-    broadband_minThreshold = 0;
+    broadband_minThreshold = -2;
     broadband_maxThreshold = 12;
     [cleaned_broadband_data, ~, broadband_sensai, broadband_thresh, broadband_ENOVA] = GEDAI_per_band(double(EEGavRef.data), EEGavRef.srate, EEGavRef.chanlocs, broadband_artifact_threshold_type, broadband_epoch_size, refCOV, broadband_optimization_type, parallel, signal_type, broadband_minThreshold, broadband_maxThreshold, smoothing_window_seconds);
     SENSAI_score_per_band = broadband_sensai;
@@ -657,7 +657,7 @@ if num_bands_to_process > 0
     required_samples = epoch_size_lowest_band * srate;
 
     while required_samples > size(EEGavRef.data, 2) && num_bands_to_process > 0
-        warning('GEDAI:InsufficientData', 'EEG data length is too short for the epoch size required by the lowest frequency band (%g Hz). Increasing lowcut_frequency.', center_frequencies(lowest_band_to_process_idx));
+        warning('GEDAI:InsufficientData', 'EEG data length is too short for the epoch size required by the lowest frequency band (%g Hz). Increasing lowcut_frequency.', lower_frequencies(lowest_band_to_process_idx));
         lowcut_frequency = upper_frequencies(lowest_band_to_process_idx);
         lowest_wavelet_bands_to_exclude = sum(upper_frequencies <= lowcut_frequency);
         num_bands_to_process = number_of_discrete_wavelet_bands - lowest_wavelet_bands_to_exclude;
@@ -676,9 +676,9 @@ epoch_sizes_per_wavelet_band = epoch_size_in_cycles ./ lower_frequencies;
 % --- Display wavelet band-widths and epoch sizes ---
 % disp(' ');  
 left_margin = '  '; 
-header1 = 'Wavelet Center Freq (Hz)';
+header1 = 'Wavelet Lower Freq (Hz)';
 header2 = 'Epoch Size (s)';
-str_freqs = num2str(center_frequencies(1:num_bands_to_process)', '%.2g');
+str_freqs = num2str(lower_frequencies(1:num_bands_to_process)', '%.2g');
 str_epochs = num2str(epoch_sizes_per_wavelet_band(1:num_bands_to_process)', '%.2g');
 col1_width = max(length(header1), size(str_freqs, 2));
 col2_width = max(length(header2), size(str_epochs, 2));
@@ -847,7 +847,8 @@ EEGartifacts.data = EEGavRef.data(:, 1:size(EEGclean.data, 2)) - EEGclean.data;
 
 % Calculate composite SENSAI score for epoch rejection
 noise_multiplier = 1;
-[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch_internal] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, broadband_epoch_size, refCOV, noise_multiplier, signal_type);
+sensai_epoch_size = 1;
+[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch_internal] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, sensai_epoch_size, refCOV, noise_multiplier, signal_type);
 
 if ~isempty(precomputed_ENOVA_per_epoch)
     ENOVA_per_epoch = precomputed_ENOVA_per_epoch;
@@ -859,7 +860,7 @@ end
 original_total_epochs = length(ENOVA_per_epoch);
 
 % Calculate ENOVA per channel as a mean across epochs
-epoch_samples = round(broadband_epoch_size * EEGavRef.srate);
+epoch_samples = round(sensai_epoch_size * EEGavRef.srate);
 pnts_total = size(EEGclean.data, 2);
 num_epochs_ch = floor(pnts_total / epoch_samples);
 
@@ -887,7 +888,7 @@ end
 epochs_to_remove = find(ENOVA_per_epoch > ENOVA_threshold_per_epoch);
 regions = [];
 if ~isempty(epochs_to_remove)
-    epoch_samples = round(broadband_epoch_size * EEGavRef.srate);
+    epoch_samples = round(sensai_epoch_size * EEGavRef.srate);
     regions = zeros(length(epochs_to_remove), 2);
     for i = 1:length(epochs_to_remove)
         epoch = epochs_to_remove(i);
@@ -1032,7 +1033,7 @@ end
 
 % Calculate final SENSAI score (after potential epoch rejection)
 
-[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, broadband_epoch_size, refCOV, noise_multiplier, signal_type);
+[SENSAI_score, ~, ~, mean_ENOVA, ENOVA_per_epoch] = SENSAI_basic(double(EEGclean.data), double(EEGartifacts.data), EEGavRef.srate, 1, refCOV, noise_multiplier, signal_type);
 
 % disp([newline 'SENSAI score: ' num2str(round(SENSAI_score, 2, 'significant'))]);
 % disp(['Mean ENOVA: ' num2str(round(mean_ENOVA, 2, 'significant'))]);
@@ -1049,7 +1050,7 @@ end
 % --- Summarized Output Table (including ENOVA) ---
 disp(' '); 
 left_margin = '  '; 
-header1 = 'Wavelet Center Freq (Hz)';
+header1 = 'Wavelet Lower Freq (Hz)';
 header2 = 'Epoch Size (s)';
 header3 = 'ENOVA (%)';
 
@@ -1059,7 +1060,7 @@ header3 = 'ENOVA (%)';
 freq_str_cell = cell(1, num_bands_to_process + 1);
 freq_str_cell{1} = 'Broadband';
 for i = 1:num_bands_to_process
-    freq_str_cell{i+1} = [num2str(center_frequencies(i), '%.2g') ' Hz'];
+    freq_str_cell{i+1} = [num2str(lower_frequencies(i), '%.2g') ' Hz'];
 end
 
 epoch_str_cell = cell(1, num_bands_to_process + 1);
@@ -1165,7 +1166,7 @@ EEGclean.etc.GEDAI.percentage_rejected = percentage_rejected;
 if exist('samples_to_keep', 'var')
     EEGclean.etc.GEDAI.samples_to_keep = samples_to_keep;
 else
-    EEGclean.etc.GEDAI.samples_to_keep = true(1, original_total_epochs * round(broadband_epoch_size * EEGavRef.srate)); 
+    EEGclean.etc.GEDAI.samples_to_keep = true(1, original_total_epochs * round(sensai_epoch_size * EEGavRef.srate)); 
     % Note: The above calculation might be slightly off if rounding happened differently for 'pnts'.
     % Safer to use current pnts if no rejection happened:
     EEGclean.etc.GEDAI.samples_to_keep = true(1, size(EEGclean.data, 2));
@@ -1178,7 +1179,7 @@ end
         % Ensure visualization uses the same PC count as the SENSAI scoring logic
         if strcmpi(signal_type, 'meg'), vis_pcs = 4; else, vis_pcs = 3; end
         
-        visualization_metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, refCOV, broadband_epoch_size, signal_type, vis_pcs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score);
+        visualization_metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, refCOV, sensai_epoch_size, signal_type, vis_pcs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score);
         
         % Store metrics in EEG.etc.GEDAI
         EEGclean.etc.GEDAI.visualization_metrics = visualization_metrics;
