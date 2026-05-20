@@ -11,6 +11,9 @@ function metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, ref_co
 %   SSI_top_PCs        - Optional: explicit number of principal components to use
 
 %% ── 0. Parse inputs and parameters ──────────────────────────────────────
+ref_cov = real(ref_cov);
+ref_cov = (ref_cov + ref_cov') / 2;
+
 if nargin < 5 || isempty(epoch_duration_sec)
     epoch_duration_sec = 1; 
 end
@@ -50,6 +53,11 @@ function COV_array = compute_cov_array(data)
         for epo = 1:num_epochs
             COV_array(:,:,epo) = (data3D(:,:,epo) * data3D(:,:,epo)') / (epoch_samples - 1);
         end
+    end
+    % Enforce real and symmetric covariance matrices
+    COV_array = real(COV_array);
+    for epo = 1:num_epochs
+        COV_array(:,:,epo) = (COV_array(:,:,epo) + COV_array(:,:,epo)') / 2;
     end
 end
 
@@ -218,6 +226,7 @@ end
 function angs = extract_angles(C_array, basis_ref, top_PCs)
     n = size(C_array, 3); angs = zeros(n, top_PCs);
     for i = 1:n
+        C_array(:,:,i) = (C_array(:,:,i) + C_array(:,:,i)') / 2;
         [V, D] = eig(C_array(:,:,i)); [~, idx] = sort(diag(D), 'descend');
         basis_c = V(:, idx(1:top_PCs));
         angs(i,:) = subspace_angles(basis_c, basis_ref)';
@@ -232,6 +241,7 @@ end
 function draw_ellipse(ax, x, y, col, conf)
     if numel(x) < 3, return; end
     mu = mean([x(:), y(:)], 1); C = cov([x(:), y(:)]); chi2_val = -2 * log(1 - conf);
+    C = (C + C') / 2;
     [V, D] = eig(C); radii = sqrt(diag(D) * chi2_val);
     t = linspace(0, 2*pi, 200); xy = V * (radii .* [cos(t); sin(t)]);
     plot(ax, mu(1) + xy(1,:), mu(2) + xy(2,:), '-', 'Color', [col, 0.85], 'LineWidth', 1.8);

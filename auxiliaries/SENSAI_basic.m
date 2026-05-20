@@ -15,9 +15,12 @@ function [SENSAI_score, SIGNAL_subspace_similarity, NOISE_subspace_similarity, m
 
     %   Calculates the Signal & Noise Subspace Alignment Index (SENSAI) from raw EEG data
     
+refCOV = real(refCOV);
+refCOV = (refCOV + refCOV') / 2;
 regularization_lambda = 0.05;
 reg_val = trace(refCOV) / length(refCOV);
 refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(length(refCOV), 'like', refCOV);
+refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
 
 %% Estimate Signal Quality
 num_chans = size(refCOV, 1);
@@ -55,6 +58,7 @@ ENOVA_per_epoch = zeros(1, num_epochs);
 for epoch = 1:num_epochs
     % SIGNAL SUBSPACE: top eigenvectors of signal covariance
     cov_signal_EEG = cov(signal_EEG_epoched(:,:,epoch)');
+    cov_signal_EEG = (cov_signal_EEG + cov_signal_EEG') / 2;
     [Vsig, Dsig] = eig(cov_signal_EEG);
     [~, idxSig] = sort(diag(Dsig), 'descend');
     basis_sig = Vsig(:, idxSig(1:SSI_top_PCs));
@@ -64,6 +68,7 @@ for epoch = 1:num_epochs
 
     % NOISE SUBSPACE: top eigenvectors of noise covariance
     cov_noise = cov(noise_EEG_epoched(:,:,epoch)');
+    cov_noise = (cov_noise + cov_noise') / 2;
     [Vnoise, Dnoise] = eig(cov_noise);
     [~, idxNoise] = sort(diag(Dnoise), 'descend');
     basis_noise = Vnoise(:, idxNoise(1:SSI_top_PCs));

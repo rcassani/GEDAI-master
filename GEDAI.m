@@ -506,7 +506,11 @@ else
                'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
    end
     end
+end
 
+% Ensure refCOV is real and perfectly symmetric to prevent eig/eigs errors
+refCOV = real(refCOV);
+refCOV = (refCOV + refCOV') / 2;
 
 % --- Wavelet-based High-Pass Filtering ---
 % Calculate required level to resolve lowcut_frequency

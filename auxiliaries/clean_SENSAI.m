@@ -66,10 +66,13 @@ Treshold1 = T1 * prctile(log_Eig_val_all, percentile_threshold);
 %% Compute Regularized Reference Covariance
 % Replicate logic from GEDAI_per_band.m to ensure we have the correct B for B-orthogonality
 % refCOV argument is the raw reference covariance.
+refCOV = real(refCOV);
+refCOV = (refCOV + refCOV') / 2;
 regularization_lambda = 0.05;
 % Using trace(refCOV)/num_chans is faster than mean(eig(refCOV)) and equivalent for SPD.
 reg_val = trace(refCOV) / num_chans;
 refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(num_chans, 'like', refCOV);
+refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
 
 
 %% Cleaning EEG by removing outlying GEVD components

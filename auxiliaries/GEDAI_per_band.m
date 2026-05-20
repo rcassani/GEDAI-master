@@ -28,6 +28,8 @@ end
 
 % Ensure refCOV matches precision of eeg_data
 refCOV = cast(refCOV, 'like', eeg_data);
+refCOV = real(refCOV);
+refCOV = (refCOV + refCOV') / 2;
 
 % Default signal_type if not provided
 if nargin < 9 || isempty(signal_type)
@@ -77,14 +79,18 @@ COV(:,:,N_epochs) = cov(EEGdata_epoched(:,:,N_epochs)');
 regularization_lambda = 0.05;
 reg_val = trace(refCOV) / N_EEG_electrodes;
 refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(N_EEG_electrodes, 'like', refCOV);
+refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
 Evec = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
 Eval = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
 Evec_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
 Eval_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
 for i=1:N_epochs-1
+    COV(:,:,i) = (COV(:,:,i) + COV(:,:,i)') / 2;
     [Evec(:,:,i), Eval(:,:,i)] = eig(COV(:,:,i), refCOV_reg, 'chol');
+    COV_2(:,:,i) = (COV_2(:,:,i) + COV_2(:,:,i)') / 2;
     [Evec_2(:,:,i), Eval_2(:,:,i)] = eig(COV_2(:,:,i), refCOV_reg, 'chol');
 end
+COV(:,:,N_epochs) = (COV(:,:,N_epochs) + COV(:,:,N_epochs)') / 2;
 [Evec(:,:,N_epochs), Eval(:,:,N_epochs)] = eig(COV(:,:,N_epochs), refCOV_reg, 'chol');
 
 
