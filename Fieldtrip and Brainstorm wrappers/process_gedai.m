@@ -288,7 +288,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_MAG = 'interpolated';
                 end
-                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts, enova_threshold, signal_type, visualize_sensai);
+                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts || visualize_sensai, enova_threshold, [], signal_type);
 
                 % --- GRAD ---
                 ChannelMatGRAD = ChannelMatFiltered;
@@ -305,7 +305,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_GRAD = 'interpolated';
                 end
-                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts, enova_threshold, signal_type, visualize_sensai);
+                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts || visualize_sensai, enova_threshold, [], signal_type);
 
                 % --- Recombine ---
                 EEGclean = brainstorm2eeglab(sInputFiltered, ChannelMatFiltered);
@@ -348,7 +348,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param = 'interpolated';
                 end
-                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts, enova_threshold, signal_type, visualize_sensai);
+                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts || visualize_sensai, enova_threshold, [], signal_type);
             end
 
             % =========================================================

@@ -224,10 +224,10 @@ function [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg)
         cfg.lowcut_frequency, ...
         cfg.ref_matrix_type, ...
         cfg.parallel, ...
-        cfg.visualize_artifacts, ...
-        [], ...              % ENOVA_threshold: [] -> GEDAI default (inf = disabled)
-        cfg.signal_type, ...
-        cfg.visualize_manifold);
+        cfg.visualize_artifacts || cfg.visualize_manifold, ...
+        [], ...              % ENOVA_threshold_per_epoch: [] -> GEDAI default (inf = disabled)
+        [], ...              % ENOVA_threshold_per_channel: [] -> GEDAI default (inf = disabled)
+        cfg.signal_type);
 end
 
 % ---------- buildEEGin: construct EEGLAB-style struct from FieldTrip data ----------
@@ -241,7 +241,11 @@ function EEGin = buildEEGin(trial_data, trial_time, labels, cfg)
     EEGin.xmin     = trial_time(1);
     EEGin.xmax     = trial_time(end);
     EEGin.trials   = 1;
-    EEGin.chanlocs = struct('labels', labels(:)');
+    chanlocs = struct('labels', labels(:)');
+    for i = 1:numel(labels)
+        chanlocs(i).type = cfg.signal_type;
+    end
+    EEGin.chanlocs = chanlocs;
     EEGin.etc      = struct();
     EEGin.event    = [];
     EEGin.epoch    = [];
