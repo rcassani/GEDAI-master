@@ -1,4 +1,4 @@
-%   GEDAI() - This is the main function used to denoise EEG data using
+%   GEDAI() - This is the main function used to denoise EEG da12ta using
 %   generalized eigenvalue decomposition coupled with an EEG leadfield matrix
 %
 %   GEDAI (Generalized Eigenvalue Deartifacting Instrument)
@@ -733,7 +733,7 @@ if parallel
             % Determine minThreshold based on signal type and frequency
             current_center_freq = center_frequencies(f);
             current_minThreshold = 0;
-            if (current_center_freq >= 7 && current_center_freq <= 13)
+            if (current_center_freq >= 0.5 && current_center_freq <= 60)
                 current_minThreshold = -6;
             end
 
