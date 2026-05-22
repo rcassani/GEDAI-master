@@ -385,12 +385,12 @@ set(hFig, 'ResizeFcn', @on_window_resized);
             case {'divide','/'}
                 % decrease timerange
                 opts.wndlen = opts.wndlen*0.9;
-            case 'pagedown'
-                % shift display page offset down
-                opts.pageoffset = opts.pageoffset+1;
-            case 'pageup'
-                % shift display page offset up
-                opts.pageoffset = opts.pageoffset-1;
+            % case 'pagedown'
+            %     % shift display page offset down
+            %     opts.pageoffset = opts.pageoffset+1;
+            % case 'pageup'
+            %     % shift display page offset up
+            %     opts.pageoffset = opts.pageoffset-1;
             case 'n'
                 opts.display_mode = 'new';
             case 'o'
