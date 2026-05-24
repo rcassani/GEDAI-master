@@ -117,7 +117,7 @@ if nargin < 3 || isempty(epoch_size_in_cycles)
     epoch_size_in_cycles = 12;  % Note: Number of wave CYCLES per epoch across wavelet bands (default = 12 cycles)
 end
 if nargin < 4 || isempty(lowcut_frequency)
-    lowcut_frequency = 0.5; %  exclude all wavelet bands below this frequency (default = 0.5 Hz)
+    lowcut_frequency = 0.8; %  exclude all wavelet bands below this frequency (default = 0.8 Hz)
 end
 if nargin < 5 || isempty(ref_matrix_type)
     ref_matrix_type = 'precomputed';
