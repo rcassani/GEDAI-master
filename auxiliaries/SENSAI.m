@@ -48,61 +48,26 @@ num_epochs = size(cov_signal_epoched, 3);
 SIGNAL_subspace_similarity_distribution = zeros(1, num_epochs);
 NOISE_subspace_similarity_distribution = zeros(1, num_epochs);
 
-% Use eig (full) for small matrices (<150 ch), eigs for large (benchmark crossover ~150-200)
-use_full_eig = (num_chans < 150);
+% Fast Subspace Iteration Setup (2-step Subspace Iteration)
+M = min(size(evecs_Template_cov, 2), SSI_top_PCs);
+Template_guess = evecs_Template_cov(:, 1:M);
 
-% Check if pageeig is available for vectorized decomposition
-success_pageeig = false;
-if use_full_eig && (exist('pageeig', 'builtin') || exist('pageeig', 'file'))
-    try
-        [Vs, Ds] = pageeig(cov_signal_epoched, 'nobalance', 'vector');
-        [Vn, Dn] = pageeig(cov_noise_epoched, 'nobalance', 'vector');
-        
-        Vs = real(Vs);
-        Vn = real(Vn);
-        
-        % Sort eigenvalues page-wise in descending order
-        [~, idx_s] = sort(real(Ds), 1, 'descend');
-        [~, idx_n] = sort(real(Dn), 1, 'descend');
-        
-        for epoch = 1:num_epochs
-            evecs_signal = Vs(:, idx_s(1:SSI_top_PCs, 1, epoch), epoch);
-            SIGNAL_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
-            
-            evecs_noise = Vn(:, idx_n(1:SSI_top_PCs, 1, epoch), epoch);
-            NOISE_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
-        end
-        success_pageeig = true;
-    catch
-        success_pageeig = false;
-    end
-end
+for epoch = 1:num_epochs
+    % SIGNAL SUBSPACE similarity via 2-step Fast Subspace Iteration
+    cov_signal = cov_signal_epoched(:,:,epoch);
+    Y1_sig = cov_signal * Template_guess;
+    [Q1_sig, ~] = qr(Y1_sig, 0);
+    Y2_sig = cov_signal * Q1_sig;
+    [evecs_signal, ~] = qr(Y2_sig, 0);
+    SIGNAL_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
 
-if ~success_pageeig
-    for epoch = 1:num_epochs
-        % SIGNAL SUBSPACE similarity
-        cov_signal = cov_signal_epoched(:,:,epoch);
-        if use_full_eig
-            [Vs, Ds] = eig(cov_signal);
-            [~, idx] = sort(diag(Ds), 'descend');
-            evecs_signal = Vs(:, idx(1:SSI_top_PCs));
-        else
-            [evecs_signal, ~] = eigs(cov_signal, SSI_top_PCs);
-        end
-        SIGNAL_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
-
-        
-        % NOISE SUBSPACE similarity
-        cov_noise = cov_noise_epoched(:,:,epoch);
-        if use_full_eig
-            [Vn, Dn] = eig(cov_noise);
-            [~, idx] = sort(diag(Dn), 'descend');
-            evecs_noise = Vn(:, idx(1:SSI_top_PCs));
-        else
-            [evecs_noise, ~] = eigs(cov_noise, SSI_top_PCs);
-        end
-        NOISE_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
-    end
+    % NOISE SUBSPACE similarity via 2-step Fast Subspace Iteration
+    cov_noise = cov_noise_epoched(:,:,epoch);
+    Y1_noise = cov_noise * Template_guess;
+    [Q1_noise, ~] = qr(Y1_noise, 0);
+    Y2_noise = cov_noise * Q1_noise;
+    [evecs_noise, ~] = qr(Y2_noise, 0);
+    NOISE_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
 end
 
 %% Compute SENSAI Score
