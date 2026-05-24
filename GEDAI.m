@@ -392,13 +392,18 @@ if strcmp(signal_type, 'eeg')
     if is_standard_avg_ref 
         disp([newline 'Data is already average referenced. Skipping internal average referencing.']);
         EEGavRef = EEGin;
+
+    elseif max(abs(sum(EEGin.data, 1) / (size(EEGin.data, 1) + 1))) < 1e-5
+        % Corrected: Removed assignment and evaluated the math directly
+        disp([newline 'Data matches non rank-deficient average reference definition. Skipping internal average referencing.']);
+        EEGavRef = EEGin;
+        
     else
-        EEGavRef = GEDAI_nonRankDeficientAveRef(EEGin); % non rank-deficient average referencing (Makoto's plugin)
-    end
-else
-    % For MEG, skip average referencing
-    EEGavRef = EEGin;
+        EEGavRef = GEDAI_nonRankDeficientAveRef(EEGin); % non rank-deficient average referencing
+    end 
+    
 end
+
 
 %% Create Reference Covariance Matrix (refCOV)
 
