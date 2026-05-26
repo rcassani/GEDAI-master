@@ -1195,7 +1195,7 @@ if visualize_artifacts
             current_epoch_size = epoch_sizes_per_wavelet_band(i-1);
         end
         
-        time_axis_minutes = (1:length(thresh_array)) * current_epoch_size / 60;
+        time_axis_minutes = ((1:length(thresh_array)) - 0.5) * current_epoch_size / 60;
         plot(time_axis_minutes, thresh_array, '-', 'Color', band_colors(i,:), 'LineWidth', 2);
         
         title(freq_str_cell{i}, 'FontSize', 12);
