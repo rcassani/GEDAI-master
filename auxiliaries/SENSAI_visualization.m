@@ -1,4 +1,4 @@
-function metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, ref_cov, epoch_duration_sec, signal_type, SSI_top_PCs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score)
+function metrics = SENSAI_visualization(EEGavRef, EEGclean, EEGartifacts, ref_cov, epoch_duration_sec, signal_type, SSI_top_PCs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score, mean_ENOVA, epoch_size_in_cycles, lowcut_frequency)
 % SENSAI_VISUALIZATION  2D SENSAI scatter: subspace similarity vs epoch power
 %
 % Inputs:
@@ -96,8 +96,14 @@ catch
 end
 
 %% ── 4. Plotting ─────────────────────────────────────────────────────────
-if nargin >= 10 && ~isempty(artifact_threshold_type) && ~isempty(smoothing_window_seconds) && ~isempty(SENSAI_score)
-    plot_title = ['SENSAI visualization (' artifact_threshold_type ' | Window: ' num2str(smoothing_window_seconds) ' s | SENSAI: ' num2str(round(SENSAI_score, 1)) '%)'];
+if nargin >= 10 && ~isempty(SENSAI_score)
+    if nargin < 11 || isempty(mean_ENOVA), mean_ENOVA = 0; end
+    if nargin < 12 || isempty(epoch_size_in_cycles), epoch_size_in_cycles = 12; end
+    if nargin < 13 || isempty(lowcut_frequency), lowcut_frequency = 0.5; end
+    if isempty(artifact_threshold_type), artifact_threshold_type = 'auto'; end
+    if isempty(smoothing_window_seconds), smoothing_window_seconds = Inf; end
+
+    plot_title = ['SENSAI = ' num2str(round(SENSAI_score, 2, 'significant')) '%, ENOVA = ' num2str(round(mean_ENOVA * 100, 2, 'significant')) '% [' artifact_threshold_type ', ' num2str(epoch_size_in_cycles) ' cycles, ' num2str(lowcut_frequency) ' Hz, ' num2str(smoothing_window_seconds) ' s]'];
 else
     plot_title = 'SENSAI visualization:  Subspace Similarity  vs  Epoch Power';
 end
