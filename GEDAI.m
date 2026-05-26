@@ -242,6 +242,10 @@ if ENOVA_threshold_per_channel < inf
         % --- INTERPOLATION ---
         disp([newline '--- INTERPOLATING BAD CHANNELS ---']);
         % Use EEGLAB's eeg_interp to interpolate missing channels back to the original montage
+        if ~isfield(EEGclean, 'icasphere'), EEGclean.icasphere = []; end
+        if ~isfield(EEGclean, 'icaweights'), EEGclean.icaweights = []; end
+        if ~isfield(EEGclean, 'icawinv'), EEGclean.icawinv = []; end
+        if ~isfield(EEGclean, 'icaact'), EEGclean.icaact = []; end
         EEGclean = eeg_interp(EEGclean, EEGin.chanlocs, 'spherical');
         
         % Reconstruct true EEGartifacts to perfectly preserve the fundamental invariant: original = clean + artifacts

@@ -89,11 +89,23 @@ function sProcess = GetDescription() %#ok<DEFNU>
     sProcess.options.enova_threshold.Type    = 'value';
     sProcess.options.enova_threshold.Value   = {0.9, '', 2};
     sProcess.options.enova_threshold.Class   = 'enova';
+    sProcess.isSeparator = 1;
+    % === ENOVA bad channel rejection
+    sProcess.options.label5.Comment = '<B>ENOVA bad channel rejection</B>';
+    sProcess.options.label5.Type    = 'label';
+    sProcess.options.reject_channels_by_enova.Comment = 'Enable';
+    sProcess.options.reject_channels_by_enova.Type    = 'checkbox';
+    sProcess.options.reject_channels_by_enova.Value   = 0;
+    sProcess.options.reject_channels_by_enova.Controller = 'enova_chan';
+    sProcess.options.enova_threshold_per_channel.Comment = 'Channel ENOVA Threshold (0-1)';
+    sProcess.options.enova_threshold_per_channel.Type    = 'value';
+    sProcess.options.enova_threshold_per_channel.Value   = {0.9, '', 2};
+    sProcess.options.enova_threshold_per_channel.Class   = 'enova_chan';
 end
 
 
 %% ===== GET OPTIONS =====
-function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, save_artifacts] = GetOptions(sProcess)
+function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, enova_threshold_per_channel, save_artifacts] = GetOptions(sProcess)
     artifact_threshold_type = sProcess.options.artifact_threshold_type.Value;
     epoch_size_in_cycles    = sProcess.options.epoch_size_in_cycles.Value{1};
     lowcut_frequency        = sProcess.options.lowcut_frequency.Value{1};
@@ -110,20 +122,28 @@ function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_m
     else
         save_artifacts = 0;
     end
-    if sProcess.options.reject_by_enova.Value
+    if isfield(sProcess.options, 'reject_by_enova') && sProcess.options.reject_by_enova.Value
         enova_threshold = sProcess.options.enova_threshold.Value{1};
     else
         enova_threshold = [];
+    end
+    if isfield(sProcess.options, 'reject_channels_by_enova') && sProcess.options.reject_channels_by_enova.Value
+        enova_threshold_per_channel = sProcess.options.enova_threshold_per_channel.Value{1};
+    else
+        enova_threshold_per_channel = [];
     end
 end
 
 
 %% ===== FORMAT COMMENT =====
 function Comment = FormatComment(sProcess) %#ok<DEFNU>
-    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, ~, ~, enova_threshold, ~] = GetOptions(sProcess);
+    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, ~, ~, enova_threshold, enova_threshold_per_channel, ~] = GetOptions(sProcess);
     Comment = ['GEDAI: ' artifact_threshold_type ', ' num2str(epoch_size_in_cycles) ' cycles, ' num2str(lowcut_frequency) ' Hz, ' ref_matrix_type];
     if ~isempty(enova_threshold)
         Comment = [Comment, ', ENOVA=' num2str(enova_threshold)];
+    end
+    if ~isempty(enova_threshold_per_channel)
+        Comment = [Comment, ', ChENOVA=' num2str(enova_threshold_per_channel)];
     end
 end
 
@@ -143,7 +163,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     end
 
     % Get options
-    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, save_artifacts] = GetOptions(sProcess);
+    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, enova_threshold_per_channel, save_artifacts] = GetOptions(sProcess);
 
     % Iterate over inputs
     for iInput = 1:length(sInputs)
@@ -288,7 +308,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_MAG = 'interpolated';
                 end
-                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts || visualize_sensai, enova_threshold, [], signal_type);
+                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts || visualize_sensai, enova_threshold, enova_threshold_per_channel, signal_type);
 
                 % --- GRAD ---
                 ChannelMatGRAD = ChannelMatFiltered;
@@ -305,7 +325,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_GRAD = 'interpolated';
                 end
-                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts || visualize_sensai, enova_threshold, [], signal_type);
+                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts || visualize_sensai, enova_threshold, enova_threshold_per_channel, signal_type);
 
                 % --- Recombine ---
                 EEGclean = brainstorm2eeglab(sInputFiltered, ChannelMatFiltered);
@@ -348,7 +368,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param = 'interpolated';
                 end
-                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts || visualize_sensai, enova_threshold, [], signal_type);
+                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts || visualize_sensai, enova_threshold, enova_threshold_per_channel, signal_type);
             end
 
             % =========================================================
@@ -470,6 +490,10 @@ function EEG = brainstorm2eeglab(sInput, ChannelMat)
     EEG.data     = sInput.A * 1e6;           % V -> µV
     EEG.etc      = [];
     EEG.event    = [];
+    EEG.icaweights = [];
+    EEG.icasphere  = [];
+    EEG.icawinv    = [];
+    EEG.icaact     = [];
 
     for i = 1:length(ChannelMat.Channel)
         EEG.chanlocs(i).labels = ChannelMat.Channel(i).Name;
