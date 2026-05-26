@@ -246,6 +246,58 @@ if ENOVA_threshold_per_channel < inf
         if ~isfield(EEGclean, 'icaweights'), EEGclean.icaweights = []; end
         if ~isfield(EEGclean, 'icawinv'), EEGclean.icawinv = []; end
         if ~isfield(EEGclean, 'icaact'), EEGclean.icaact = []; end
+        
+        % Ensure polar coordinates exist in chanlocs for eeg_interp compatibility
+        if ~isfield(EEGclean.chanlocs, 'theta') || any(cellfun('isempty', {EEGclean.chanlocs.theta}))
+            try
+                EEGclean.chanlocs = convertlocs(EEGclean.chanlocs, 'cart2all');
+                EEGin.chanlocs = convertlocs(EEGin.chanlocs, 'cart2all');
+            catch
+                % Manual fallback if convertlocs is unavailable
+                for idx = 1:length(EEGclean.chanlocs)
+                    if ~isfield(EEGclean.chanlocs(idx), 'theta') || isempty(EEGclean.chanlocs(idx).theta)
+                        x = EEGclean.chanlocs(idx).X; y = EEGclean.chanlocs(idx).Y; z = EEGclean.chanlocs(idx).Z;
+                        if ~isnan(x) && ~isnan(y) && ~isnan(z)
+                            r = sqrt(x^2 + y^2 + z^2);
+                            if r > 0
+                                EEGclean.chanlocs(idx).theta = -atan2d(x, y);
+                                EEGclean.chanlocs(idx).radius = sqrt(x^2 + y^2) / r * 0.5;
+                            else
+                                EEGclean.chanlocs(idx).theta = 0;
+                                EEGclean.chanlocs(idx).radius = 0;
+                            end
+                        else
+                            EEGclean.chanlocs(idx).theta = 0;
+                            EEGclean.chanlocs(idx).radius = 0;
+                        end
+                    end
+                    if ~isfield(EEGclean.chanlocs(idx), 'sph_theta'),   EEGclean.chanlocs(idx).sph_theta = []; end
+                    if ~isfield(EEGclean.chanlocs(idx), 'sph_phi'),     EEGclean.chanlocs(idx).sph_phi = []; end
+                    if ~isfield(EEGclean.chanlocs(idx), 'sph_radius'),  EEGclean.chanlocs(idx).sph_radius = []; end
+                end
+                for idx = 1:length(EEGin.chanlocs)
+                    if ~isfield(EEGin.chanlocs(idx), 'theta') || isempty(EEGin.chanlocs(idx).theta)
+                        x = EEGin.chanlocs(idx).X; y = EEGin.chanlocs(idx).Y; z = EEGin.chanlocs(idx).Z;
+                        if ~isnan(x) && ~isnan(y) && ~isnan(z)
+                            r = sqrt(x^2 + y^2 + z^2);
+                            if r > 0
+                                EEGin.chanlocs(idx).theta = -atan2d(x, y);
+                                EEGin.chanlocs(idx).radius = sqrt(x^2 + y^2) / r * 0.5;
+                            else
+                                EEGin.chanlocs(idx).theta = 0;
+                                EEGin.chanlocs(idx).radius = 0;
+                            end
+                        else
+                            EEGin.chanlocs(idx).theta = 0;
+                            EEGin.chanlocs(idx).radius = 0;
+                        end
+                    end
+                    if ~isfield(EEGin.chanlocs(idx), 'sph_theta'),   EEGin.chanlocs(idx).sph_theta = []; end
+                    if ~isfield(EEGin.chanlocs(idx), 'sph_phi'),     EEGin.chanlocs(idx).sph_phi = []; end
+                    if ~isfield(EEGin.chanlocs(idx), 'sph_radius'),  EEGin.chanlocs(idx).sph_radius = []; end
+                end
+            end
+        end
         EEGclean = eeg_interp(EEGclean, EEGin.chanlocs, 'spherical');
         
         % Reconstruct true EEGartifacts to perfectly preserve the fundamental invariant: original = clean + artifacts

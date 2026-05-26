@@ -508,6 +508,36 @@ function EEG = brainstorm2eeglab(sInput, ChannelMat)
         end
         EEG.chanlocs(i).type = ChannelMat.Channel(i).Type;
     end
+
+    % Ensure all standard Cartesian, polar, and spherical fields exist and are populated
+    try
+        EEG.chanlocs = convertlocs(EEG.chanlocs, 'cart2all');
+    catch
+        % If convertlocs fails or is missing, initialize them manually to prevent crashes
+        for i = 1:length(EEG.chanlocs)
+            if ~isfield(EEG.chanlocs(i), 'theta') || isempty(EEG.chanlocs(i).theta)
+                x = EEG.chanlocs(i).X; y = EEG.chanlocs(i).Y; z = EEG.chanlocs(i).Z;
+                if ~isnan(x) && ~isnan(y) && ~isnan(z)
+                    r = sqrt(x^2 + y^2 + z^2);
+                    if r > 0
+                        EEG.chanlocs(i).theta = -atan2d(x, y);
+                        EEG.chanlocs(i).radius = sqrt(x^2 + y^2) / r * 0.5;
+                    else
+                        EEG.chanlocs(i).theta = 0;
+                        EEG.chanlocs(i).radius = 0;
+                    end
+                else
+                    EEG.chanlocs(i).theta = 0;
+                    EEG.chanlocs(i).radius = 0;
+                end
+            end
+            if ~isfield(EEG.chanlocs(i), 'sph_theta'),   EEG.chanlocs(i).sph_theta = []; end
+            if ~isfield(EEG.chanlocs(i), 'sph_phi'),     EEG.chanlocs(i).sph_phi = []; end
+            if ~isfield(EEG.chanlocs(i), 'sph_radius'),  EEG.chanlocs(i).sph_radius = []; end
+            if ~isfield(EEG.chanlocs(i), 'urchan'),      EEG.chanlocs(i).urchan = i; end
+            if ~isfield(EEG.chanlocs(i), 'ref'),         EEG.chanlocs(i).ref = ''; end
+        end
+    end
 end
 
 function sOutput = eeglab2brainstorm(EEG, sInput)
