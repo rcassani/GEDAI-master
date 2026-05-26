@@ -90,11 +90,32 @@ lpow_before    = 10 * log10(extract_power(C_before));
 lpow_after     = 10 * log10(extract_power(C_after));
 lpow_artifacts = 10 * log10(extract_power(C_artifacts));
 
-% Clean only the artifact metrics in case they contain NaN or -Inf (e.g., when no artifacts are removed)
-% to prevent NaN propagation to mean/variance and subsequent crashes, while keeping the 
-% original lpow_before and lpow_after completely untouched.
-lpow_artifacts(isnan(lpow_artifacts) | (isinf(lpow_artifacts) & lpow_artifacts < 0)) = min(lpow_after) - 10;
+% Clean NaN and Inf from SSI distributions
+ssi_before(isnan(ssi_before) | isinf(ssi_before)) = 0;
+ssi_after(isnan(ssi_after) | isinf(ssi_after)) = 0;
 ssi_artifacts(isnan(ssi_artifacts) | isinf(ssi_artifacts)) = 0;
+
+% Clean NaN and Inf in epoch power distributions (to prevent NaN/Inf propagation in mean/std calculations)
+valid_b = isfinite(lpow_before);
+if any(valid_b)
+    lpow_before(~valid_b) = min(lpow_before(valid_b)) - 10;
+else
+    lpow_before(~valid_b) = -100;
+end
+
+valid_a = isfinite(lpow_after);
+if any(valid_a)
+    lpow_after(~valid_a) = min(lpow_after(valid_a)) - 10;
+else
+    lpow_after(~valid_a) = -100;
+end
+
+valid_n = isfinite(lpow_artifacts);
+if any(valid_n)
+    lpow_artifacts(~valid_n) = min(lpow_after) - 10;
+else
+    lpow_artifacts(~valid_n) = min(lpow_after) - 10;
+end
 
 ideal_power_target = median(lpow_after);
 
@@ -124,8 +145,8 @@ try
         ssi_noise_scaled = ssi_scaled(numel(ssi_after)+1:end);
         
         % Evaluate 1D KDE densities
-        [f_sig_at_X, ~] = ksdensity(ssi_sig_scaled, ssi_scaled);
-        [f_noise_at_X, ~] = ksdensity(ssi_noise_scaled, ssi_scaled);
+        f_sig_at_X = robust_kde(ssi_sig_scaled, ssi_scaled);
+        f_noise_at_X = robust_kde(ssi_noise_scaled, ssi_scaled);
         
         % Classify points based on 1D density
         predicted_labels = (f_sig_at_X > f_noise_at_X);
@@ -145,8 +166,8 @@ try
         X_noise_scaled = X_data_scaled(numel(ssi_after)+1:end, :);
         
         % Evaluate 2D KDE densities
-        [f_sig_at_X, ~] = ksdensity(X_sig_scaled, X_data_scaled);
-        [f_noise_at_X, ~] = ksdensity(X_noise_scaled, X_data_scaled);
+        f_sig_at_X = robust_kde(X_sig_scaled, X_data_scaled);
+        f_noise_at_X = robust_kde(X_noise_scaled, X_data_scaled);
         
         % Classify points based on 2D density
         predicted_labels = (f_sig_at_X > f_noise_at_X);
@@ -235,8 +256,19 @@ chi2_95 = -2 * log(1 - 0.95);
 get_extents = @(x) [mean(x) - sqrt(var(x)*chi2_95), mean(x) + sqrt(var(x)*chi2_95)];
 ext_b = get_extents(lpow_before); ext_a = get_extents(lpow_after); ext_n = get_extents(lpow_artifacts);
 all_vals = [lpow_before; lpow_after; lpow_artifacts; ext_b'; ext_a'; ext_n'];
-x_min = min(all_vals); x_max = max(all_vals);
-x_lims = [x_min - 2, x_max + 5]; 
+
+% Remove non-finite values to prevent crashes in min/max/xlim
+all_vals = all_vals(isfinite(all_vals));
+if isempty(all_vals)
+    x_lims = [-50, 100];
+else
+    x_min = min(all_vals); x_max = max(all_vals);
+    if x_min == x_max
+        x_lims = [x_min - 5, x_max + 5];
+    else
+        x_lims = [x_min - 2, x_max + 5];
+    end
+end
 xlim(ax1, x_lims); xlim(ax2, x_lims);
 text(ax1, mean(x_lims), 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
@@ -253,16 +285,16 @@ if ~isempty(gmm)
         
         grid_ssi_scaled = (Yg(:) - mu_ssi) ./ sigma_ssi;
         
-        f_sig_grid = ksdensity(ssi_sig_scaled, grid_ssi_scaled);
-        f_noise_grid = ksdensity(ssi_noise_scaled, grid_ssi_scaled);
+        f_sig_grid = robust_kde(ssi_sig_scaled, grid_ssi_scaled);
+        f_noise_grid = robust_kde(ssi_noise_scaled, grid_ssi_scaled);
         
         F_sig = reshape(f_sig_grid, size(Yg));
         F_noise = reshape(f_noise_grid, size(Yg));
         
-        [f_sig_self, ~] = ksdensity(ssi_sig_scaled, ssi_sig_scaled);
+        f_sig_self = robust_kde(ssi_sig_scaled, ssi_sig_scaled);
         thresh_sig = prctile(f_sig_self, 5);
         
-        [f_noise_self, ~] = ksdensity(ssi_noise_scaled, ssi_noise_scaled);
+        f_noise_self = robust_kde(ssi_noise_scaled, ssi_noise_scaled);
         thresh_noise = prctile(f_noise_self, 5);
     else
         % 2D KDE shading with 2x SSI weighting
@@ -275,16 +307,16 @@ if ~isempty(gmm)
         grid_points_scaled = (grid_points - mu_X) ./ sigma_X;
         grid_points_scaled(:, 1) = grid_points_scaled(:, 1) * 2; % Apply the 2x SSI weight
         
-        f_sig_grid = ksdensity(X_sig_scaled, grid_points_scaled);
-        f_noise_grid = ksdensity(X_noise_scaled, grid_points_scaled);
+        f_sig_grid = robust_kde(X_sig_scaled, grid_points_scaled);
+        f_noise_grid = robust_kde(X_noise_scaled, grid_points_scaled);
         
         F_sig = reshape(f_sig_grid, size(Xg));
         F_noise = reshape(f_noise_grid, size(Xg));
         
-        [f_sig_self, ~] = ksdensity(X_sig_scaled, X_sig_scaled);
+        f_sig_self = robust_kde(X_sig_scaled, X_sig_scaled);
         thresh_sig = prctile(f_sig_self, 5);
         
-        [f_noise_self, ~] = ksdensity(X_noise_scaled, X_noise_scaled);
+        f_noise_self = robust_kde(X_noise_scaled, X_noise_scaled);
         thresh_noise = prctile(f_noise_self, 5);
     end
     
@@ -399,8 +431,8 @@ function add_marginal_densities(ax, x_data, y_data, cols, SSI_top_PCs, ttl)
     ax_y = axes('Position', [pos(1) + new_w + margin, pos(2), pos(3) * m_size, new_h], 'Units', 'normalized', 'Color', 'none', 'YLim', ax.YLim, 'YTick', [], 'XTick', [], 'YAxisLocation', 'left', 'Box', 'off');
     hold(ax_y, 'on');
     for i = 1:length(x_data)
-        try [f, xi] = ksdensity(x_data{i}); fill(ax_x, xi, f, cols{i}, 'FaceAlpha', 0.2, 'EdgeColor', cols{i}, 'LineWidth', 1); catch, end
-        try [f, yi] = ksdensity(y_data{i}); fill(ax_y, f, yi, cols{i}, 'FaceAlpha', 0.2, 'EdgeColor', cols{i}, 'LineWidth', 1); catch, end
+        try [f, xi] = robust_kde(x_data{i}); fill(ax_x, xi, f, cols{i}, 'FaceAlpha', 0.2, 'EdgeColor', cols{i}, 'LineWidth', 1); catch, end
+        try [f, yi] = robust_kde(y_data{i}); fill(ax_y, f, yi, cols{i}, 'FaceAlpha', 0.2, 'EdgeColor', cols{i}, 'LineWidth', 1); catch, end
     end
     linkaxes([ax, ax_x], 'x'); linkaxes([ax, ax_y], 'y');
     if isempty(x_data) && isempty(y_data)
@@ -466,5 +498,118 @@ function ari = compute_ari(labels_true, labels_pred)
         ari = 0;
     else
         ari = (sum_nij_choose_2 - expected_index) / (max_index - expected_index);
+    end
+end
+
+function [f, xi] = robust_kde(X_train, X_eval, bw)
+    % A robust, pure-MATLAB Gaussian Kernel Density Estimator
+    % Handles empty datasets, NaNs, Infs, and does not require Statistics Toolbox.
+    
+    if nargin < 2
+        X_eval = [];
+    end
+    if nargin < 3
+        bw = [];
+    end
+
+    % Clean X_train of NaN/Inf values
+    if isempty(X_train)
+        if ~isempty(X_eval)
+            f = zeros(size(X_eval, 1), 1);
+            xi = [];
+        else
+            f = []; xi = [];
+        end
+        return;
+    end
+    
+    D = size(X_train, 2);
+    if D == 1
+        X_train = X_train(isfinite(X_train));
+    else
+        X_train = X_train(all(isfinite(X_train), 2), :);
+    end
+    
+    N_train = size(X_train, 1);
+    if N_train == 0
+        if ~isempty(X_eval)
+            f = zeros(size(X_eval, 1), 1);
+            xi = [];
+        else
+            f = []; xi = [];
+        end
+        return;
+    end
+    
+    % If X_eval is empty or not provided, generate 100 auto-spaced points (only for 1D)
+    if isempty(X_eval)
+        if D == 1
+            x_min = min(X_train);
+            x_max = max(X_train);
+            sig = std(X_train);
+            if isnan(sig) || sig == 0
+                sig = 1.0;
+            end
+            if x_min == x_max
+                x_min = x_min - 1;
+                x_max = x_max + 1;
+            end
+            xi = linspace(x_min - 3*sig, x_max + 3*sig, 100)';
+            X_eval_clean = xi;
+        else
+            error('Auto-spaced evaluation points only supported for 1D data.');
+        end
+    else
+        xi = [];
+        % Replace NaN/Inf in evaluation points with 0 to prevent calculations from failing,
+        % but we will track which rows were invalid.
+        if D == 1
+            valid_eval = isfinite(X_eval);
+            X_eval_clean = X_eval;
+            X_eval_clean(~valid_eval) = 0;
+        else
+            valid_eval = all(isfinite(X_eval), 2);
+            X_eval_clean = X_eval;
+            X_eval_clean(~valid_eval, :) = 0;
+        end
+    end
+    
+    % Compute bandwidth if not provided
+    if isempty(bw)
+        if D == 1
+            sig = std(X_train);
+            if isnan(sig) || sig == 0, sig = 1.0; end
+            bw = 1.06 * sig * N_train^(-1/5);
+        else
+            bw = zeros(1, D);
+            for d = 1:D
+                sig = std(X_train(:, d));
+                if isnan(sig) || sig == 0, sig = 1.0; end
+                bw(d) = sig * N_train^(-1/6);
+            end
+        end
+    end
+    
+    % Evaluate density
+    N_eval = size(X_eval_clean, 1);
+    f = zeros(N_eval, 1);
+    
+    if D == 1
+        for i = 1:N_eval
+            z = (X_train - X_eval_clean(i)) ./ bw;
+            f(i) = sum(exp(-0.5 * z.^2)) / (N_train * sqrt(2 * pi) * bw);
+        end
+    else
+        prod_bw = prod(bw);
+        for i = 1:N_eval
+            diff = (X_train - X_eval_clean(i, :)) ./ bw;
+            sq_dist = sum(diff.^2, 2);
+            f(i) = sum(exp(-0.5 * sq_dist)) / (N_train * (2 * pi)^(D/2) * prod_bw);
+        end
+    end
+    
+    % If X_eval was provided and had invalid values, set those densities to 0
+    if ~isempty(X_eval)
+        f(~valid_eval) = 0;
     end
 end
