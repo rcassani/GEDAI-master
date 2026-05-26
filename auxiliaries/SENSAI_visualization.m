@@ -92,19 +92,44 @@ lpow_artifacts = 10 * log10(extract_power(C_artifacts));
 
 ideal_power_target = median(lpow_after);
 
-%% ── 3. LDA Classification ──────────────────────────────────────────────
-X_lda = [ssi_after, lpow_after; ssi_artifacts, lpow_artifacts];
-Y_lda = [ones(numel(ssi_after), 1); zeros(numel(ssi_artifacts), 1)];
+%% ── 3. Non-Parametric KDE Clustering & Classification ───────────────────
+X_data = [ssi_after, lpow_after; ssi_artifacts, lpow_artifacts];
+Y_true = [ones(numel(ssi_after), 1); zeros(numel(ssi_artifacts), 1)];
+
 try
-    lda_full     = fitcdiscr(X_lda, Y_lda);
-    lda_accuracy = (1 - resubLoss(lda_full)) * 100;
+    % Standardize features for robust, balanced 2D density estimation
+    mu_X = mean(X_data, 1);
+    sigma_X = std(X_data, 0, 1);
+    sigma_X(sigma_X == 0) = 1;
+    
+    X_data_scaled = (X_data - mu_X) ./ sigma_X;
+    X_sig_scaled = X_data_scaled(1:numel(ssi_after), :);
+    X_noise_scaled = X_data_scaled(numel(ssi_after)+1:end, :);
+    
+    % Evaluate KDE densities of Signal and Noise points at all data points
+    [f_sig_at_X, ~] = ksdensity(X_sig_scaled, X_data_scaled);
+    [f_noise_at_X, ~] = ksdensity(X_noise_scaled, X_data_scaled);
+    
+    % Classify points based on non-parametric density comparison (Kernel Bayes Classifier)
+    % This is extremely sensitive to mutual intrusions of green/red points into each other's zones
+    predicted_labels = (f_sig_at_X > f_noise_at_X);
+    gmm_accuracy = mean(predicted_labels == Y_true) * 100;
+    
+    % Compute Adjusted Rand Index (ARI) using the KDE-classified labels
+    gmm_ari = compute_ari(Y_true, predicted_labels);
     
     % --- SSI Silhouette Score ---
-    % User preference: Only sensitive to the Y-axis (SSI) separation.
-    sil_signal = custom_1d_silhouette(X_lda(:, 1), Y_lda, 1);
-catch
-    lda_accuracy = NaN;
-    lda_full     = [];
+    % Only sensitive to the Y-axis (SSI) separation.
+    sil_signal = custom_1d_silhouette(X_data(:, 1), Y_true, 1);
+    
+    % Set gmm flag to non-empty struct to trigger downstream non-parametric shading
+    gmm = struct('mu_X', mu_X, 'sigma_X', sigma_X);
+catch ME
+    warning('KDE classification failed: %s', ME.message);
+    disp(ME.getReport());
+    gmm = [];
+    gmm_accuracy = NaN;
+    gmm_ari = NaN;
     sil_signal   = NaN;
 end
 
@@ -177,17 +202,53 @@ x_lims = [x_min - 2, x_max + 5];
 xlim(ax1, x_lims); xlim(ax2, x_lims);
 text(ax1, mean(x_lims), 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
-% ── 5.1 LDA Shading ──
-if ~isempty(lda_full)
+if ~isempty(gmm)
     xl = ax2.XLim; yl = ax2.YLim;
     [Xg, Yg] = meshgrid(linspace(xl(1), xl(2), 200), linspace(yl(1), yl(2), 200));
-    [~, Probs] = predict(lda_full, [Yg(:), Xg(:)]);
-    Pg = reshape(Probs(:,2), size(Xg)); 
-    h_cont = imagesc(ax2, xl, yl, Pg);
-    set(ax2, 'YDir', 'normal'); 
-    n = 64;
-    bg_cmap = [[ones(n,1); linspace(1, 0.92, n)'], [linspace(0.92, 1, n)'; ones(n,1)], [linspace(0.92, 1, n)'; linspace(1, 0.92, n)']];
-    colormap(ax2, bg_cmap); clim(ax2, [0 1]);
+    
+    % Evaluate densities on the grid in the same standardized space
+    grid_points = [Yg(:), Xg(:)]; % [ssi, lpow]
+    grid_points_scaled = (grid_points - mu_X) ./ sigma_X;
+    
+    f_sig_grid = ksdensity(X_sig_scaled, grid_points_scaled);
+    f_noise_grid = ksdensity(X_noise_scaled, grid_points_scaled);
+    
+    F_sig = reshape(f_sig_grid, size(Xg));
+    F_noise = reshape(f_noise_grid, size(Xg));
+    
+    % Estimate self-densities to find the 5th percentile boundary for cluster isolation
+    [f_sig_self, ~] = ksdensity(X_sig_scaled, X_sig_scaled);
+    thresh_sig = prctile(f_sig_self, 5); % Isolates 95% of the Green points
+    
+    [f_noise_self, ~] = ksdensity(X_noise_scaled, X_noise_scaled);
+    thresh_noise = prctile(f_noise_self, 5); % Isolates 95% of the Red points
+    
+    % Determine classification boundaries and zones
+    is_sig_zone = F_sig >= thresh_sig;
+    is_noise_zone = F_noise >= thresh_noise;
+    
+    % Overlap resolution: if zones overlap, density determines class dominance
+    is_sig_dominant = is_sig_zone & (F_sig >= F_noise);
+    is_noise_dominant = is_noise_zone & (F_noise > F_sig);
+    
+    % Create custom background RGB image (start with pure white)
+    bg_rgb = ones(size(Xg, 1), size(Xg, 2), 3);
+    bg_rgb_R = bg_rgb(:,:,1); bg_rgb_G = bg_rgb(:,:,2); bg_rgb_B = bg_rgb(:,:,3);
+    
+    % Paint Soft Isolated Green Zone
+    bg_rgb_R(is_sig_dominant) = 0.94;
+    bg_rgb_G(is_sig_dominant) = 0.99;
+    bg_rgb_B(is_sig_dominant) = 0.95;
+    
+    % Paint Soft Isolated Red Zone
+    bg_rgb_R(is_noise_dominant) = 0.99;
+    bg_rgb_G(is_noise_dominant) = 0.94;
+    bg_rgb_B(is_noise_dominant) = 0.94;
+    
+    % Combine channels back and plot
+    bg_rgb(:,:,1) = bg_rgb_R; bg_rgb(:,:,2) = bg_rgb_G; bg_rgb(:,:,3) = bg_rgb_B;
+    h_cont = imagesc(ax2, xl, yl, bg_rgb);
+    set(ax2, 'YDir', 'normal');
     uistack(h_cont, 'bottom');
 end
 text(ax2, ideal_power_target, 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
@@ -204,9 +265,9 @@ ttl1 = sprintf('Before Denoising  |  Mean SSI: %.2f', mean(ssi_before));
 add_marginal_densities(ax1, {}, {}, {}, SSI_top_PCs, ttl1);
 
 % Panel 2 Marginals
-if ~isnan(sil_signal)
-    ttl2 = sprintf('After Denoising  |  Mean SSSI: %.2f   |   Mean NSSI: %.2f\nSSI Silhouette Score: %.2f', ...
-                  mean(ssi_after), mean(ssi_artifacts), sil_signal);
+if ~isnan(gmm_ari)
+    ttl2 = sprintf('After Denoising  |  Mean SSSI: %.2f   |   Mean NSSI: %.2f\nGaussian Adjusted Rand Index (GARI): %.3f', ...
+                  mean(ssi_after), mean(ssi_artifacts), gmm_ari);
 else
     ttl2 = sprintf('After Denoising\nMean SSSI: %.2f   |   Mean NSSI: %.2f', ...
                   mean(ssi_after), mean(ssi_artifacts));
@@ -216,7 +277,9 @@ add_marginal_densities(ax2, {lpow_after, lpow_artifacts}, {ssi_after, ssi_artifa
 metrics = struct('ssi_before_mean', mean(ssi_before), ...
                  'ssi_after_mean', mean(ssi_after), ...
                  'ssi_artifacts_mean', mean(ssi_artifacts), ...
-                 'lda_accuracy', lda_accuracy, ...
+                 'gmm_accuracy', gmm_accuracy, ...
+                 'lda_accuracy', gmm_accuracy, ... % Included for backward compatibility
+                 'GARI', gmm_ari, ...
                  'signal_silhouette', sil_signal, ...
                  'ideal_power_target_db', ideal_power_target);
 if nargin >= 11 && ~isempty(mean_ENOVA)
@@ -308,4 +371,35 @@ function sil_score = custom_1d_silhouette(x, y, target_class)
         end
     end
     sil_score = mean(sil_scores);
+end
+
+function ari = compute_ari(labels_true, labels_pred)
+    % Manual 2x2 contingency table for binary classes {0, 1}
+    C = zeros(2, 2);
+    for i = 1:numel(labels_true)
+        row = double(labels_true(i)) + 1;
+        col = double(labels_pred(i)) + 1;
+        C(row, col) = C(row, col) + 1;
+    end
+    
+    n = sum(C(:));
+    sum_rows = sum(C, 2);
+    sum_cols = sum(C, 1);
+    
+    % Sum of combinations
+    n_choose_2 = n * (n - 1) / 2;
+    sum_nij_choose_2 = sum(C(:) .* (C(:) - 1)) / 2;
+    sum_ai_choose_2 = sum(sum_rows .* (sum_rows - 1)) / 2;
+    sum_bj_choose_2 = sum(sum_cols .* (sum_cols - 1)) / 2;
+    
+    % Expected Index
+    expected_index = sum_ai_choose_2 * sum_bj_choose_2 / n_choose_2;
+    max_index = (sum_ai_choose_2 + sum_bj_choose_2) / 2;
+    
+    % Adjusted Rand Index
+    if max_index == expected_index
+        ari = 0;
+    else
+        ari = (sum_nij_choose_2 - expected_index) / (max_index - expected_index);
+    end
 end
