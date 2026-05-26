@@ -198,8 +198,9 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         
         % Add channel labels to y axis
         if isfield(old.chanlocs,'labels')
-            set(hAxis,'ytick',flipud(channel_y));
-            set(hAxis,'yticklabel',fliplr({old.chanlocs.labels}));
+            set(hAxis,'ytick',channel_y(end:-1:1));
+            labels = {old.chanlocs.labels};
+            set(hAxis,'yticklabel',labels(end:-1:1));
         end
         
         % compute sample range
