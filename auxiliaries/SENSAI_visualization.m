@@ -90,6 +90,16 @@ lpow_before    = 10 * log10(extract_power(C_before));
 lpow_after     = 10 * log10(extract_power(C_after));
 lpow_artifacts = 10 * log10(extract_power(C_artifacts));
 
+% Clean any NaN or Inf values (e.g., -Inf from log10(0) when no artifacts are removed)
+% to prevent NaN propagation to mean/variance and subsequent ksdensity/xlim crashes.
+ssi_before(isnan(ssi_before) | isinf(ssi_before)) = 0;
+ssi_after(isnan(ssi_after) | isinf(ssi_after)) = 0;
+ssi_artifacts(isnan(ssi_artifacts) | isinf(ssi_artifacts)) = 0;
+
+lpow_before(isnan(lpow_before) | isinf(lpow_before)) = 0;
+lpow_after(isnan(lpow_after) | isinf(lpow_after)) = 0;
+lpow_artifacts(isnan(lpow_artifacts) | isinf(lpow_artifacts)) = 0;
+
 ideal_power_target = median(lpow_after);
 
 %% ── 3. Non-Parametric KDE Clustering & Classification ───────────────────
@@ -103,6 +113,12 @@ try
     sigma_X(sigma_X == 0) = 1;
     
     X_data_scaled = (X_data - mu_X) ./ sigma_X;
+    
+    % SSI Weighting: Amplify the vertical SSI axis (Column 1) by a factor of 2.
+    % This makes the non-parametric classification twice as sensitive to neural 
+    % SSI separation as to horizontal Epoch Power differences.
+    X_data_scaled(:, 1) = X_data_scaled(:, 1) * 2;
+    
     X_sig_scaled = X_data_scaled(1:numel(ssi_after), :);
     X_noise_scaled = X_data_scaled(numel(ssi_after)+1:end, :);
     
@@ -209,6 +225,7 @@ if ~isempty(gmm)
     % Evaluate densities on the grid in the same standardized space
     grid_points = [Yg(:), Xg(:)]; % [ssi, lpow]
     grid_points_scaled = (grid_points - mu_X) ./ sigma_X;
+    grid_points_scaled(:, 1) = grid_points_scaled(:, 1) * 2; % Apply the 2x SSI weight
     
     f_sig_grid = ksdensity(X_sig_scaled, grid_points_scaled);
     f_noise_grid = ksdensity(X_noise_scaled, grid_points_scaled);
