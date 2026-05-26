@@ -162,6 +162,7 @@ hFig = figure('KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); hold on; axis()
 hAxis = gca;
 hSlider = uicontrol('style','slider','KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); on_resize();
 set(hSlider, 'callback', @on_update);
+addlistener(hSlider, 'ContinuousValueChange', @(~,~) on_update());
 % jSlider = findjobj(hSlider);
 % jSlider.AdjustmentValueChangedCallback = @on_update;
 
@@ -198,7 +199,7 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         
         % Add channel labels to y axis
         if isfield(old.chanlocs,'labels')
-            set(hAxis,'ytick',channel_y(end:-1:1));
+                  set(hAxis,'ytick',channel_y(end:-1:1));
             labels = {old.chanlocs.labels};
             set(hAxis,'yticklabel',labels(end:-1:1));
         end
@@ -245,20 +246,42 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         
         xrange = xl(1):(xl(2)-xl(1))/(length(wndindices)-1):xl(2);
         yoffset = repmat(channel_y,1,length(wndindices));
+        
+        % Fast plotting optimization: vectorize lines with NaN separators
+        insert_nans = @(Y) reshape([Y, NaN(size(Y,1),1)]', 1, []);
+        x_nan = insert_nans(repmat(xrange, size(oldwnd,1), 1));
+        
         switch opts.display_mode
             case 'both'
                 title([tit '; superposition'],'Interpreter','none');
-                h_old = plot(xrange, (yoffset + scale.*oldwnd)','Color',opts.oldcol,'LineWidth',opts.line_width(1));
-                h_new = plot(xrange, (yoffset + scale.*newwnd)','Color',opts.newcol,'LineWidth',opts.line_width(2));
+                h_old = plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
+                
+                % Check for bad channels to highlight in red
+                if isfield(new, 'etc') && isfield(new.etc, 'GEDAI') && isfield(new.etc.GEDAI, 'bad_channels_removed') && ~isempty(new.etc.GEDAI.bad_channels_removed)
+                    bad_chans = new.etc.GEDAI.bad_channels_removed;
+                    good_chans = setdiff(1:size(newwnd,1), bad_chans);
+                    
+                    % Plot good channels in newcol
+                    newwnd_good = nan(size(newwnd));
+                    newwnd_good(good_chans,:) = newwnd(good_chans,:);
+                    h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd_good), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                    
+                    % Plot bad channels in magenta to distinguish from original red data
+                    newwnd_bad = nan(size(newwnd));
+                    newwnd_bad(bad_chans,:) = newwnd(bad_chans,:);
+                    plot(x_nan, insert_nans(yoffset + scale.*newwnd_bad), 'Color',[1 0 1],'LineWidth',opts.line_width(end));
+                else
+                    h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                end
             case 'new'
                 title([tit '; cleaned'],'Interpreter','none');
-                plot(xrange, (yoffset + scale.*newwnd)','Color',opts.newcol,'LineWidth',opts.line_width(2));
+                plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
             case 'old'
                 title([tit '; original'],'Interpreter','none');
-                plot(xrange, (yoffset + scale.*oldwnd)','Color',opts.oldcol,'LineWidth',opts.line_width(1));
+                plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
             case 'diff'
                 title([tit '; difference'],'Interpreter','none');
-                plot(xrange, (yoffset + scale.*(oldwnd-newwnd))','Color',opts.newcol,'LineWidth',opts.line_width(1));
+                plot(x_nan, insert_nans(yoffset + scale.*(oldwnd-newwnd)), 'Color',opts.newcol,'LineWidth',opts.line_width(1));
         end
         
         % also plot events
@@ -363,12 +386,12 @@ set(hFig, 'ResizeFcn', @on_window_resized);
             case {'divide','/'}
                 % decrease timerange
                 opts.wndlen = opts.wndlen*0.9;
-            case 'pagedown'
-                % shift display page offset down
-                opts.pageoffset = opts.pageoffset+1;
-            case 'pageup'
-                % shift display page offset up
-                opts.pageoffset = opts.pageoffset-1;
+            % case 'pagedown'
+            %     % shift display page offset down
+            %     opts.pageoffset = opts.pageoffset+1;
+            % case 'pageup'
+            %     % shift display page offset up
+            %     opts.pageoffset = opts.pageoffset-1;
             case 'n'
                 opts.display_mode = 'new';
             case 'o'
@@ -396,10 +419,10 @@ end
 function map = gen_colormap(eventstruct,mapname)
 map.keys = unique({eventstruct.type});
 if isscalar(map.keys)
-    tmp = colormap(mapname);
+    tmp = feval(mapname, 256);
     map.values = tmp(round(end/2),:);
 elseif ~isempty(map.keys)
-    tmp = colormap(mapname);
+    tmp = feval(mapname, 256);
     map.values = tmp(1+floor((0:length(map.keys)-1)/(length(map.keys)-1)*(length(tmp)-1)),:);
 else
     map.values = [];
