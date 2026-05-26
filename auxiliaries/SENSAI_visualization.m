@@ -90,15 +90,11 @@ lpow_before    = 10 * log10(extract_power(C_before));
 lpow_after     = 10 * log10(extract_power(C_after));
 lpow_artifacts = 10 * log10(extract_power(C_artifacts));
 
-% Clean any NaN or Inf values (e.g., -Inf from log10(0) when no artifacts are removed)
-% to prevent NaN propagation to mean/variance and subsequent ksdensity/xlim crashes.
-ssi_before(isnan(ssi_before) | isinf(ssi_before)) = 0;
-ssi_after(isnan(ssi_after) | isinf(ssi_after)) = 0;
+% Clean only the artifact metrics in case they contain NaN or -Inf (e.g., when no artifacts are removed)
+% to prevent NaN propagation to mean/variance and subsequent crashes, while keeping the 
+% original lpow_before and lpow_after completely untouched.
+lpow_artifacts(isnan(lpow_artifacts) | (isinf(lpow_artifacts) & lpow_artifacts < 0)) = min(lpow_after) - 10;
 ssi_artifacts(isnan(ssi_artifacts) | isinf(ssi_artifacts)) = 0;
-
-lpow_before(isnan(lpow_before) | isinf(lpow_before)) = 0;
-lpow_after(isnan(lpow_after) | isinf(lpow_after)) = 0;
-lpow_artifacts(isnan(lpow_artifacts) | isinf(lpow_artifacts)) = 0;
 
 ideal_power_target = median(lpow_after);
 
@@ -107,39 +103,65 @@ X_data = [ssi_after, lpow_after; ssi_artifacts, lpow_artifacts];
 Y_true = [ones(numel(ssi_after), 1); zeros(numel(ssi_artifacts), 1)];
 
 try
-    % Standardize features for robust, balanced 2D density estimation
+    % Compute mean and standard deviation
     mu_X = mean(X_data, 1);
     sigma_X = std(X_data, 0, 1);
-    sigma_X(sigma_X == 0) = 1;
     
-    X_data_scaled = (X_data - mu_X) ./ sigma_X;
+    % Check if Epoch Power (Column 2) has near-zero variance (e.g., normalized/flat data).
+    % If so, we fall back to a 1D density estimation purely along the SSI axis to
+    % prevent mathematical degeneracy and circular plotting artifacts.
+    use_1d_fallback = (sigma_X(2) < 1e-3);
     
-    % SSI Weighting: Amplify the vertical SSI axis (Column 1) by a factor of 2.
-    % This makes the non-parametric classification twice as sensitive to neural 
-    % SSI separation as to horizontal Epoch Power differences.
-    X_data_scaled(:, 1) = X_data_scaled(:, 1) * 2;
+    if use_1d_fallback
+        disp('Warning: Epoch Power has near-zero variance. Falling back to 1D SSI density estimation.');
+        ssi_data = X_data(:, 1);
+        mu_ssi = mean(ssi_data);
+        sigma_ssi = std(ssi_data);
+        if sigma_ssi == 0, sigma_ssi = 1; end
+        
+        ssi_scaled = (ssi_data - mu_ssi) ./ sigma_ssi;
+        ssi_sig_scaled = ssi_scaled(1:numel(ssi_after));
+        ssi_noise_scaled = ssi_scaled(numel(ssi_after)+1:end);
+        
+        % Evaluate 1D KDE densities
+        [f_sig_at_X, ~] = ksdensity(ssi_sig_scaled, ssi_scaled);
+        [f_noise_at_X, ~] = ksdensity(ssi_noise_scaled, ssi_scaled);
+        
+        % Classify points based on 1D density
+        predicted_labels = (f_sig_at_X > f_noise_at_X);
+        
+        % Set GMM metadata to trigger 1D horizontal band shading downstream
+        gmm = struct('use_1d', true, 'mu_ssi', mu_ssi, 'sigma_ssi', sigma_ssi, ...
+                     'ssi_sig_scaled', ssi_sig_scaled, 'ssi_noise_scaled', ssi_noise_scaled);
+    else
+        % Use 2D KDE with 2x SSI weighting
+        sigma_X(sigma_X == 0) = 1;
+        X_data_scaled = (X_data - mu_X) ./ sigma_X;
+        
+        % SSI Weighting: Amplify the vertical SSI axis (Column 1) by a factor of 2.
+        X_data_scaled(:, 1) = X_data_scaled(:, 1) * 2;
+        
+        X_sig_scaled = X_data_scaled(1:numel(ssi_after), :);
+        X_noise_scaled = X_data_scaled(numel(ssi_after)+1:end, :);
+        
+        % Evaluate 2D KDE densities
+        [f_sig_at_X, ~] = ksdensity(X_sig_scaled, X_data_scaled);
+        [f_noise_at_X, ~] = ksdensity(X_noise_scaled, X_data_scaled);
+        
+        % Classify points based on 2D density
+        predicted_labels = (f_sig_at_X > f_noise_at_X);
+        
+        % Set GMM metadata to trigger 2D contour shading downstream
+        gmm = struct('use_1d', false, 'mu_X', mu_X, 'sigma_X', sigma_X, ...
+                     'X_sig_scaled', X_sig_scaled, 'X_noise_scaled', X_noise_scaled);
+    end
     
-    X_sig_scaled = X_data_scaled(1:numel(ssi_after), :);
-    X_noise_scaled = X_data_scaled(numel(ssi_after)+1:end, :);
-    
-    % Evaluate KDE densities of Signal and Noise points at all data points
-    [f_sig_at_X, ~] = ksdensity(X_sig_scaled, X_data_scaled);
-    [f_noise_at_X, ~] = ksdensity(X_noise_scaled, X_data_scaled);
-    
-    % Classify points based on non-parametric density comparison (Kernel Bayes Classifier)
-    % This is extremely sensitive to mutual intrusions of green/red points into each other's zones
-    predicted_labels = (f_sig_at_X > f_noise_at_X);
     gmm_accuracy = mean(predicted_labels == Y_true) * 100;
-    
-    % Compute Adjusted Rand Index (ARI) using the KDE-classified labels
     gmm_ari = compute_ari(Y_true, predicted_labels);
     
     % --- SSI Silhouette Score ---
     % Only sensitive to the Y-axis (SSI) separation.
     sil_signal = custom_1d_silhouette(X_data(:, 1), Y_true, 1);
-    
-    % Set gmm flag to non-empty struct to trigger downstream non-parametric shading
-    gmm = struct('mu_X', mu_X, 'sigma_X', sigma_X);
 catch ME
     warning('KDE classification failed: %s', ME.message);
     disp(ME.getReport());
@@ -222,23 +244,49 @@ if ~isempty(gmm)
     xl = ax2.XLim; yl = ax2.YLim;
     [Xg, Yg] = meshgrid(linspace(xl(1), xl(2), 200), linspace(yl(1), yl(2), 200));
     
-    % Evaluate densities on the grid in the same standardized space
-    grid_points = [Yg(:), Xg(:)]; % [ssi, lpow]
-    grid_points_scaled = (grid_points - mu_X) ./ sigma_X;
-    grid_points_scaled(:, 1) = grid_points_scaled(:, 1) * 2; % Apply the 2x SSI weight
-    
-    f_sig_grid = ksdensity(X_sig_scaled, grid_points_scaled);
-    f_noise_grid = ksdensity(X_noise_scaled, grid_points_scaled);
-    
-    F_sig = reshape(f_sig_grid, size(Xg));
-    F_noise = reshape(f_noise_grid, size(Xg));
-    
-    % Estimate self-densities to find the 5th percentile boundary for cluster isolation
-    [f_sig_self, ~] = ksdensity(X_sig_scaled, X_sig_scaled);
-    thresh_sig = prctile(f_sig_self, 5); % Isolates 95% of the Green points
-    
-    [f_noise_self, ~] = ksdensity(X_noise_scaled, X_noise_scaled);
-    thresh_noise = prctile(f_noise_self, 5); % Isolates 95% of the Red points
+    if gmm.use_1d
+        % 1D KDE shading along the Y-axis (SSI) only
+        mu_ssi = gmm.mu_ssi;
+        sigma_ssi = gmm.sigma_ssi;
+        ssi_sig_scaled = gmm.ssi_sig_scaled;
+        ssi_noise_scaled = gmm.ssi_noise_scaled;
+        
+        grid_ssi_scaled = (Yg(:) - mu_ssi) ./ sigma_ssi;
+        
+        f_sig_grid = ksdensity(ssi_sig_scaled, grid_ssi_scaled);
+        f_noise_grid = ksdensity(ssi_noise_scaled, grid_ssi_scaled);
+        
+        F_sig = reshape(f_sig_grid, size(Yg));
+        F_noise = reshape(f_noise_grid, size(Yg));
+        
+        [f_sig_self, ~] = ksdensity(ssi_sig_scaled, ssi_sig_scaled);
+        thresh_sig = prctile(f_sig_self, 5);
+        
+        [f_noise_self, ~] = ksdensity(ssi_noise_scaled, ssi_noise_scaled);
+        thresh_noise = prctile(f_noise_self, 5);
+    else
+        % 2D KDE shading with 2x SSI weighting
+        mu_X = gmm.mu_X;
+        sigma_X = gmm.sigma_X;
+        X_sig_scaled = gmm.X_sig_scaled;
+        X_noise_scaled = gmm.X_noise_scaled;
+        
+        grid_points = [Yg(:), Xg(:)];
+        grid_points_scaled = (grid_points - mu_X) ./ sigma_X;
+        grid_points_scaled(:, 1) = grid_points_scaled(:, 1) * 2; % Apply the 2x SSI weight
+        
+        f_sig_grid = ksdensity(X_sig_scaled, grid_points_scaled);
+        f_noise_grid = ksdensity(X_noise_scaled, grid_points_scaled);
+        
+        F_sig = reshape(f_sig_grid, size(Xg));
+        F_noise = reshape(f_noise_grid, size(Xg));
+        
+        [f_sig_self, ~] = ksdensity(X_sig_scaled, X_sig_scaled);
+        thresh_sig = prctile(f_sig_self, 5);
+        
+        [f_noise_self, ~] = ksdensity(X_noise_scaled, X_noise_scaled);
+        thresh_noise = prctile(f_noise_self, 5);
+    end
     
     % Determine classification boundaries and zones
     is_sig_zone = F_sig >= thresh_sig;
@@ -252,12 +300,12 @@ if ~isempty(gmm)
     bg_rgb = ones(size(Xg, 1), size(Xg, 2), 3);
     bg_rgb_R = bg_rgb(:,:,1); bg_rgb_G = bg_rgb(:,:,2); bg_rgb_B = bg_rgb(:,:,3);
     
-    % Paint Soft Isolated Green Zone
+    % Paint Soft Isolated Green Zone (Horizontal Band if 1D, isolated blob if 2D)
     bg_rgb_R(is_sig_dominant) = 0.94;
     bg_rgb_G(is_sig_dominant) = 0.99;
     bg_rgb_B(is_sig_dominant) = 0.95;
     
-    % Paint Soft Isolated Red Zone
+    % Paint Soft Isolated Red Zone (Horizontal Band if 1D, isolated blob if 2D)
     bg_rgb_R(is_noise_dominant) = 0.99;
     bg_rgb_G(is_noise_dominant) = 0.94;
     bg_rgb_B(is_noise_dominant) = 0.94;
