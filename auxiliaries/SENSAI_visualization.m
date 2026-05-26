@@ -123,7 +123,7 @@ colormap(ax1, parula);
 cb = colorbar(ax1, 'eastoutside');
 cb.Label.String = 'SSI (Subspace Similarity Index) relative to Leadfield';
 cb.Label.FontSize = 12;
-clim(ax1, [0 1]);
+ax1.CLim = [0 1];
 
 xlabel(ax1, 'Epoch Power (dB)', 'FontSize', 11);
 ylabel(ax1, sprintf('SSI (geom. mean of top-%d PC cosines)', SSI_top_PCs), 'FontSize', 11);
@@ -170,7 +170,7 @@ if ~isempty(lda_full)
     set(ax2, 'YDir', 'normal'); 
     n = 64;
     bg_cmap = [[ones(n,1); linspace(1, 0.92, n)'], [linspace(0.92, 1, n)'; ones(n,1)], [linspace(0.92, 1, n)'; linspace(1, 0.92, n)']];
-    colormap(ax2, bg_cmap); clim(ax2, [0 1]);
+    colormap(ax2, bg_cmap); ax2.CLim = [0 1];
     uistack(h_cont, 'bottom');
 end
 text(ax2, ideal_power_target, 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
