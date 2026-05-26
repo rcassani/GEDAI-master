@@ -155,8 +155,18 @@ chi2_95 = -2 * log(1 - 0.95);
 get_extents = @(x) [mean(x) - sqrt(var(x)*chi2_95), mean(x) + sqrt(var(x)*chi2_95)];
 ext_b = get_extents(lpow_before); ext_a = get_extents(lpow_after); ext_n = get_extents(lpow_artifacts);
 all_vals = [lpow_before; lpow_after; lpow_artifacts; ext_b'; ext_a'; ext_n'];
-x_min = min(all_vals); x_max = max(all_vals);
-x_lims = [x_min - 2, x_max + 5]; 
+all_vals_finite = all_vals(isfinite(all_vals));
+if isempty(all_vals_finite)
+    x_lims = [-10, 10];
+else
+    x_min = min(all_vals_finite);
+    x_max = max(all_vals_finite);
+    if x_min == x_max
+        x_lims = [x_min - 5, x_max + 5];
+    else
+        x_lims = [x_min - 2, x_max + 5];
+    end
+end
 xlim(ax1, x_lims); xlim(ax2, x_lims);
 text(ax1, mean(x_lims), 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5*col_star, 'HorizontalAlignment', 'center', 'FontWeight', 'bold');
 
