@@ -1335,15 +1335,47 @@ if ~isfield(EEG, 'chanlocs') || isempty(EEG.chanlocs)
 end
 
 channel_labels = {EEG.chanlocs.labels};
-reference_idx = find(strcmpi(channel_labels, output_reference_channel), 1);
-if isempty(reference_idx)
-    warning('GEDAI:ReferenceChannelNotFound', 'Output reference channel "%s" was not found. Returning average-referenced output.', output_reference_channel);
-    return;
+reference_signal = [];
+switch output_reference_channel
+    case '__GEDAI_REF_M1M2_AVG__'
+        idx_m1 = find(strcmpi(channel_labels, 'M1'), 1);
+        idx_m2 = find(strcmpi(channel_labels, 'M2'), 1);
+        if isempty(idx_m1) || isempty(idx_m2)
+            warning('GEDAI:ReferenceChannelNotFound', 'Output reference channels M1 and M2 were not both found. Returning average-referenced output.');
+            return;
+        end
+        reference_signal = (EEG.data(idx_m1, :, :) + EEG.data(idx_m2, :, :)) / 2;
+        applied_reference_label = 'M1+M2(avg)';
+    case '__GEDAI_REF_A1A2_AVG__'
+        idx_a1 = find(strcmpi(channel_labels, 'A1'), 1);
+        idx_a2 = find(strcmpi(channel_labels, 'A2'), 1);
+        if isempty(idx_a1) || isempty(idx_a2)
+            warning('GEDAI:ReferenceChannelNotFound', 'Output reference channels A1 and A2 were not both found. Returning average-referenced output.');
+            return;
+        end
+        reference_signal = (EEG.data(idx_a1, :, :) + EEG.data(idx_a2, :, :)) / 2;
+        applied_reference_label = 'A1+A2(avg)';
+    case '__GEDAI_REF_TP9TP10_AVG__'
+        idx_tp9 = find(strcmpi(channel_labels, 'TP9'), 1);
+        idx_tp10 = find(strcmpi(channel_labels, 'TP10'), 1);
+        if isempty(idx_tp9) || isempty(idx_tp10)
+            warning('GEDAI:ReferenceChannelNotFound', 'Output reference channels TP9 and TP10 were not both found. Returning average-referenced output.');
+            return;
+        end
+        reference_signal = (EEG.data(idx_tp9, :, :) + EEG.data(idx_tp10, :, :)) / 2;
+        applied_reference_label = 'TP9+TP10(avg)';
+    otherwise
+        reference_idx = find(strcmpi(channel_labels, output_reference_channel), 1);
+        if isempty(reference_idx)
+            warning('GEDAI:ReferenceChannelNotFound', 'Output reference channel "%s" was not found. Returning average-referenced output.', output_reference_channel);
+            return;
+        end
+        reference_signal = EEG.data(reference_idx, :, :);
+        applied_reference_label = EEG.chanlocs(reference_idx).labels;
 end
 
-% Re-reference by subtracting the selected channel from all channels.
-EEG.data = bsxfun(@minus, EEG.data, EEG.data(reference_idx, :, :));
-applied_reference_label = EEG.chanlocs(reference_idx).labels;
+% Re-reference by subtracting the selected reference signal from all channels.
+EEG.data = bsxfun(@minus, EEG.data, reference_signal);
 
 EEG.ref = applied_reference_label;
 for chIdx = 1:EEG.nbchan

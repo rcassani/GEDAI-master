@@ -24,15 +24,35 @@ ENOVA_threshold_per_epoch = 0.9;
 ENOVA_threshold_per_channel = 0.9;
 smoothing_window_seconds_default = Inf;
 
-% Build popup menu entries for output reference channel selection
+% Build popup menu entries for output reference selection.
 channel_labels = {EEG.chanlocs.labels};
-if isempty(channel_labels)
-    ref_channel_popup_options = 'AvgRef';
-else
-    % Replace any separators to keep inputgui popup format valid.
-    channel_labels = strrep(channel_labels, '|', '/');
-    ref_channel_popup_options = ['AvgRef|' strjoin(channel_labels, '|')];
+channel_labels_sanitized = strrep(channel_labels, '|', '/');
+channel_labels_lower = lower(channel_labels);
+
+output_ref_display_options = {'AvgRef'};
+output_ref_value_options = {''};
+
+% Add pairwise average options only when both channels are present.
+if any(strcmp(channel_labels_lower, 'm1')) && any(strcmp(channel_labels_lower, 'm2'))
+    output_ref_display_options{end+1} = 'M1+M2 (avg)';
+    output_ref_value_options{end+1} = '__GEDAI_REF_M1M2_AVG__';
 end
+if any(strcmp(channel_labels_lower, 'a1')) && any(strcmp(channel_labels_lower, 'a2'))
+    output_ref_display_options{end+1} = 'A1+A2 (avg)';
+    output_ref_value_options{end+1} = '__GEDAI_REF_A1A2_AVG__';
+end
+if any(strcmp(channel_labels_lower, 'tp9')) && any(strcmp(channel_labels_lower, 'tp10'))
+    output_ref_display_options{end+1} = 'TP9+TP10 (avg)';
+    output_ref_value_options{end+1} = '__GEDAI_REF_TP9TP10_AVG__';
+end
+
+% Add all individual channels.
+for chIdx = 1:numel(channel_labels_sanitized)
+    output_ref_display_options{end+1} = channel_labels_sanitized{chIdx};
+    output_ref_value_options{end+1} = channel_labels{chIdx};
+end
+
+ref_channel_popup_options = strjoin(output_ref_display_options, '|');
 
 % Create an inputParser to handle varargin
 p = inputParser;
@@ -111,14 +131,9 @@ if ~isfinite(selected_ref_popup_index) || isempty(selected_ref_popup_index)
 end
 
 selected_ref_popup_index = max(1, round(selected_ref_popup_index));
-max_ref_popup_index = numel(channel_labels) + 1;
+max_ref_popup_index = numel(output_ref_value_options);
 selected_ref_popup_index = min(selected_ref_popup_index, max_ref_popup_index);
-
-if ~isempty(channel_labels) && selected_ref_popup_index > 1
-    selected_output_reference_channel = channel_labels{selected_ref_popup_index - 1};
-else
-    selected_output_reference_channel = '';
-end
+selected_output_reference_channel = output_ref_value_options{selected_ref_popup_index};
 
 use_parallel = logical(out.parallel_processing);
 visualize_artifacts = logical(out.visualization_A);
