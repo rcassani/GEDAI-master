@@ -751,3 +751,15 @@ if ~isempty(EEG.event)
     switch format, case 'struct', EEG = eventsformat(EEG, 'struct'); end
 end
 
+function [C, ia] = setdiff_bc(A, B, varargin)
+    [C, ia] = setdiff(A, B, 'legacy');
+
+function [C, ia, ib] = intersect_bc(A, B, varargin)
+    [C, ia, ib] = intersect(A, B, 'legacy');
+
+function [C, ia, ib] = unique_bc(A, varargin)
+    [C, ia, ib] = unique(A, 'legacy');
+
+function [C, ia, ib] = union_bc(A, B, varargin)
+    [C, ia, ib] = union(A, B, 'legacy');
+

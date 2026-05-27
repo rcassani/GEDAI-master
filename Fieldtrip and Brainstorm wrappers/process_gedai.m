@@ -51,7 +51,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
     % === Low-cut frequency
     sProcess.options.lowcut_frequency.Comment = 'Low-cut frequency';
     sProcess.options.lowcut_frequency.Type    = 'value';
-    sProcess.options.lowcut_frequency.Value   = {0.5, 'Hz', 1};
+    sProcess.options.lowcut_frequency.Value   = {1.0, 'Hz', 1};
     % === Reference matrix type
     sProcess.options.label2.Comment = '<B>Leadfield matrix</B>';
     sProcess.options.label2.Type    = 'label';
@@ -68,11 +68,7 @@ function sProcess = GetDescription() %#ok<DEFNU>
     % === Visualize artifacts
     sProcess.options.visualize_artifacts.Comment = 'Visualize artifacts';
     sProcess.options.visualize_artifacts.Type    = 'checkbox';
-    sProcess.options.visualize_artifacts.Value   = 0;
-    % === SENSAI visualization
-    sProcess.options.visualize_sensai.Comment = 'SENSAI visualization (Subspace Similarity vs Power dB)';
-    sProcess.options.visualize_sensai.Type    = 'checkbox';
-    sProcess.options.visualize_sensai.Value   = 1;
+    sProcess.options.visualize_artifacts.Value   = 1;
     % === Save artifacts data
     sProcess.options.save_artifacts.Comment = 'Save artifacts data';
     sProcess.options.save_artifacts.Type    = 'checkbox';
@@ -105,7 +101,7 @@ end
 
 
 %% ===== GET OPTIONS =====
-function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, enova_threshold_per_channel, save_artifacts] = GetOptions(sProcess)
+function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, enova_threshold, enova_threshold_per_channel, save_artifacts] = GetOptions(sProcess)
     artifact_threshold_type = sProcess.options.artifact_threshold_type.Value;
     epoch_size_in_cycles    = sProcess.options.epoch_size_in_cycles.Value{1};
     lowcut_frequency        = sProcess.options.lowcut_frequency.Value{1};
@@ -116,7 +112,6 @@ function [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_m
     end
     parallel             = sProcess.options.parallel.Value;
     visualize_artifacts  = sProcess.options.visualize_artifacts.Value;
-    visualize_sensai     = sProcess.options.visualize_sensai.Value;
     if isfield(sProcess.options, 'save_artifacts') && isfield(sProcess.options.save_artifacts, 'Value')
         save_artifacts = sProcess.options.save_artifacts.Value;
     else
@@ -163,7 +158,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
     end
 
     % Get options
-    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, visualize_sensai, enova_threshold, enova_threshold_per_channel, save_artifacts] = GetOptions(sProcess);
+    [artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, parallel, visualize_artifacts, enova_threshold, enova_threshold_per_channel, save_artifacts] = GetOptions(sProcess);
 
     % Iterate over inputs
     for iInput = 1:length(sInputs)
@@ -218,7 +213,10 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             % =========================================================
             % STEP 2: CHANNEL SELECTION
             % =========================================================
-            eeg_meg_idx = find(ismember({ChannelMat.Channel.Type}, {'EEG', 'MEG', 'MEG MAG', 'MEG GRAD'}));
+            if ~isfield(sInput, 'ChannelFlag') || isempty(sInput.ChannelFlag)
+                sInput.ChannelFlag = ones(length(ChannelMat.Channel), 1);
+            end
+            eeg_meg_idx = find(ismember({ChannelMat.Channel.Type}, {'EEG', 'MEG', 'MEG MAG', 'MEG GRAD'}) & (sInput.ChannelFlag(:)' == 1));
             if isempty(eeg_meg_idx)
                 bst_report('Error', sProcess, sInput, 'No EEG or MEG channels found.');
                 continue;
@@ -308,7 +306,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_MAG = 'interpolated';
                 end
-                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts || visualize_sensai, enova_threshold, enova_threshold_per_channel, signal_type);
+                [EEGclean_MAG, EEGartifacts_MAG] = GEDAI(EEG_MAG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_MAG, parallel, visualize_artifacts, enova_threshold, enova_threshold_per_channel, signal_type);
 
                 % --- GRAD ---
                 ChannelMatGRAD = ChannelMatFiltered;
@@ -325,7 +323,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param_GRAD = 'interpolated';
                 end
-                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts || visualize_sensai, enova_threshold, enova_threshold_per_channel, signal_type);
+                [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts, enova_threshold, enova_threshold_per_channel, signal_type);
 
                 % --- Recombine ---
                 EEGclean = brainstorm2eeglab(sInputFiltered, ChannelMatFiltered);
@@ -368,7 +366,7 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 else
                     ref_matrix_param = 'interpolated';
                 end
-                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts || visualize_sensai, enova_threshold, enova_threshold_per_channel, signal_type);
+                [EEGclean, EEGartifacts] = GEDAI(EEG, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param, parallel, visualize_artifacts, enova_threshold, enova_threshold_per_channel, signal_type);
             end
 
             % =========================================================

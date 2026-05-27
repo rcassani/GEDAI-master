@@ -4,7 +4,7 @@
 %   GEDAI (Generalized Eigenvalue Deartifacting Instrument)
 %
 % Usage:
-% Example 1: Using all default values (and no bad epoch rejection)
+% Example 1: Using all default values (and no bad epoch/channel rejection)
 %    >>  [EEG] = GEDAI(EEG);
 %
 % Example 2: Defining some parameters
@@ -298,7 +298,7 @@ if ENOVA_threshold_per_channel < inf
                 end
             end
         end
-        EEGclean = eeg_interp(EEGclean, EEGin.chanlocs, 'spherical');
+        EEGclean = eeg_interp_GEDAI(EEGclean, EEGin.chanlocs, 'spherical');
         
         % Reconstruct true EEGartifacts to perfectly preserve the fundamental invariant: original = clean + artifacts
         EEGartifacts = EEGclean;
