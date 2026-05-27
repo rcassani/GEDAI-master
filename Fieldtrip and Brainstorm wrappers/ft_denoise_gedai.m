@@ -61,6 +61,8 @@ def.ref_matrix_type         = 'precomputed';
 def.parallel                = true;
 def.visualize_artifacts     = false;
 def.visualize_manifold      = false;
+def.enova_threshold_per_epoch = [];
+def.enova_threshold_per_channel = [];
 def.cat_trials              = true;
 def.signal_type             = '';       % empty = auto-detect
 
@@ -169,8 +171,8 @@ function [dataClean, timeClean, artifactData, Sscore, Sband, Athr] = ...
 
     if process_mag_grad_separately
         % --- Run GEDAI separately on MAG and GRAD ---
-        EEGin_MAG  = buildEEGin(trial_data(mag_idx, :),  trial_time, data.label(mag_idx),  cfg);
-        EEGin_GRAD = buildEEGin(trial_data(grad_idx, :), trial_time, data.label(grad_idx), cfg);
+        EEGin_MAG  = buildEEGin(trial_data(mag_idx, :),  trial_time, data.label(mag_idx),  cfg, data);
+        EEGin_GRAD = buildEEGin(trial_data(grad_idx, :), trial_time, data.label(grad_idx), cfg, data);
 
         [EEGclean_MAG,  EEGart_MAG,  Sscore_MAG,  Sband_MAG,  Athr_MAG]  = runGEDAI(EEGin_MAG,  cfg);
         [EEGclean_GRAD, EEGart_GRAD, Sscore_GRAD, Sband_GRAD, Athr_GRAD] = runGEDAI(EEGin_GRAD, cfg);
@@ -199,7 +201,7 @@ function [dataClean, timeClean, artifactData, Sscore, Sband, Athr] = ...
     else
         % --- Single pass (EEG or homogeneous MEG) ---
         nTime = size(trial_data, 2);
-        EEGin = buildEEGin(trial_data, trial_time, data.label, cfg);
+        EEGin = buildEEGin(trial_data, trial_time, data.label, cfg, data);
         [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg);
 
         % EEGclean.data may be longer (padded) or shorter (epochs rejected)
@@ -225,13 +227,13 @@ function [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg)
         cfg.ref_matrix_type, ...
         cfg.parallel, ...
         cfg.visualize_artifacts || cfg.visualize_manifold, ...
-        [], ...              % ENOVA_threshold_per_epoch: [] -> GEDAI default (inf = disabled)
-        [], ...              % ENOVA_threshold_per_channel: [] -> GEDAI default (inf = disabled)
+        cfg.enova_threshold_per_epoch, ...
+        cfg.enova_threshold_per_channel, ...
         cfg.signal_type);
 end
 
 % ---------- buildEEGin: construct EEGLAB-style struct from FieldTrip data ----------
-function EEGin = buildEEGin(trial_data, trial_time, labels, cfg)
+function EEGin = buildEEGin(trial_data, trial_time, labels, cfg, data)
     EEGin          = struct();
     EEGin.data     = trial_data;
     EEGin.srate    = 1 / mean(diff(trial_time));
@@ -241,11 +243,68 @@ function EEGin = buildEEGin(trial_data, trial_time, labels, cfg)
     EEGin.xmin     = trial_time(1);
     EEGin.xmax     = trial_time(end);
     EEGin.trials   = 1;
+
+    % Try to extract spatial coordinates from FieldTrip's elec/grad structure
+    has_coords = false;
+    loc_struct = [];
+    if isfield(data, 'elec') && ~isempty(data.elec)
+        loc_struct = data.elec;
+    elseif isfield(data, 'grad') && ~isempty(data.grad)
+        loc_struct = data.grad;
+    end
+    
+    if ~isempty(loc_struct) && isfield(loc_struct, 'chanpos') && isfield(loc_struct, 'label')
+        [found, loc_idx] = ismember(labels, loc_struct.label);
+        if all(found)
+            has_coords = true;
+            chanpos = loc_struct.chanpos(loc_idx, :);
+        end
+    end
+
     chanlocs = struct('labels', labels(:)');
     for i = 1:numel(labels)
         chanlocs(i).type = cfg.signal_type;
+        if has_coords
+            chanlocs(i).X = chanpos(i, 1);
+            chanlocs(i).Y = chanpos(i, 2);
+            chanlocs(i).Z = chanpos(i, 3);
+        else
+            chanlocs(i).X = NaN;
+            chanlocs(i).Y = NaN;
+            chanlocs(i).Z = NaN;
+        end
     end
     EEGin.chanlocs = chanlocs;
+
+    % Ensure all standard Cartesian, polar, and spherical fields exist and are populated
+    try
+        EEGin.chanlocs = convertlocs(EEGin.chanlocs, 'cart2all');
+    catch
+        % If convertlocs fails or is missing, initialize them manually to prevent crashes
+        for i = 1:length(EEGin.chanlocs)
+            if ~isfield(EEGin.chanlocs(i), 'theta') || isempty(EEGin.chanlocs(i).theta)
+                x = EEGin.chanlocs(i).X; y = EEGin.chanlocs(i).Y; z = EEGin.chanlocs(i).Z;
+                if ~isnan(x) && ~isnan(y) && ~isnan(z)
+                    r = sqrt(x^2 + y^2 + z^2);
+                    if r > 0
+                        EEGin.chanlocs(i).theta = -atan2d(x, y);
+                        EEGin.chanlocs(i).radius = sqrt(x^2 + y^2) / r * 0.5;
+                    else
+                        EEGin.chanlocs(i).theta = 0;
+                        EEGin.chanlocs(i).radius = 0;
+                    end
+                else
+                    EEGin.chanlocs(i).theta = 0;
+                    EEGin.chanlocs(i).radius = 0;
+                end
+            end
+            if ~isfield(EEGin.chanlocs(i), 'sph_theta'),   EEGin.chanlocs(i).sph_theta = []; end
+            if ~isfield(EEGin.chanlocs(i), 'sph_phi'),     EEGin.chanlocs(i).sph_phi = []; end
+            if ~isfield(EEGin.chanlocs(i), 'sph_radius'),  EEGin.chanlocs(i).sph_radius = []; end
+            if ~isfield(EEGin.chanlocs(i), 'urchan'),      EEGin.chanlocs(i).urchan = i; end
+            if ~isfield(EEGin.chanlocs(i), 'ref'),         EEGin.chanlocs(i).ref = ''; end
+        end
+    end
     EEGin.etc      = struct();
     EEGin.event    = [];
     EEGin.epoch    = [];

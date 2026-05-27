@@ -24,6 +24,16 @@ ENOVA_threshold_per_epoch = 0.9;
 ENOVA_threshold_per_channel = 0.9;
 smoothing_window_seconds_default = Inf;
 
+% Build popup menu entries for output reference channel selection
+channel_labels = {EEG.chanlocs.labels};
+if isempty(channel_labels)
+    ref_channel_popup_options = 'AvgRef';
+else
+    % Replace any separators to keep inputgui popup format valid.
+    channel_labels = strrep(channel_labels, '|', '/');
+    ref_channel_popup_options = ['AvgRef|' strjoin(channel_labels, '|')];
+end
+
 % Create an inputParser to handle varargin
 p = inputParser;
 addParameter(p, 'artifact_threshold', artifact_threshold);
@@ -45,10 +55,12 @@ uilist = { ...
     {'style' 'text' 'string' 'Reject bad channels:'} {'style' 'checkbox' 'string' '' 'tag' 'reject_channels_by_enova' 'value' 0}, ...
     {'style' 'text' 'string' 'Channel ENOVA Threshold (0-1)'} {'style' 'edit' 'string' num2str(ENOVA_threshold_per_channel) 'tag' 'ENOVA_threshold_per_channel'}, ...
     {} ...
+    {'style' 'text' 'string' 'Output reference'} {'style' 'popupmenu' 'string' ref_channel_popup_options 'tag' 'output_reference_popup'}, ...
+    {} ...
     {'style' 'text' 'string' 'Parallel processing ( > RAM):'} {'style' 'checkbox' 'string' '' 'tag' 'parallel_processing' 'Value' 1}, ...
     {'style' 'text' 'string' 'Artifact visualization:'} {'style' 'checkbox' 'string' '' 'tag' 'visualization_A' 'Value' 1}, ...
 };
-geometry = { [1, 1] [1, 1] [1, 1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1, 1] };
+geometry = { [1, 1] [1, 1] [1, 1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1, 1] [1] [1, 1] [1] [1, 1] [1, 1] };
 title = '  GEDAI denoising toolbox |  v1.7  ';
 
 % Get user input
@@ -81,10 +93,40 @@ else
     ENOVA_threshold_per_channel = [];
 end
 
+selected_ref_popup_raw = out.output_reference_popup;
+if iscell(selected_ref_popup_raw)
+    selected_ref_popup_raw = selected_ref_popup_raw{1};
+end
+
+if isnumeric(selected_ref_popup_raw) || islogical(selected_ref_popup_raw)
+    selected_ref_popup_index = double(selected_ref_popup_raw(1));
+elseif ischar(selected_ref_popup_raw) || (isstring(selected_ref_popup_raw) && isscalar(selected_ref_popup_raw))
+    selected_ref_popup_index = str2double(char(selected_ref_popup_raw));
+else
+    selected_ref_popup_index = 1;
+end
+
+if ~isfinite(selected_ref_popup_index) || isempty(selected_ref_popup_index)
+    selected_ref_popup_index = 1;
+end
+
+selected_ref_popup_index = max(1, round(selected_ref_popup_index));
+max_ref_popup_index = numel(channel_labels) + 1;
+selected_ref_popup_index = min(selected_ref_popup_index, max_ref_popup_index);
+
+if ~isempty(channel_labels) && selected_ref_popup_index > 1
+    selected_output_reference_channel = channel_labels{selected_ref_popup_index - 1};
+else
+    selected_output_reference_channel = '';
+end
+
 use_parallel = logical(out.parallel_processing);
 visualize_artifacts = logical(out.visualization_A);
 
-[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, [], smoothing_window_seconds);
+% Popup-only behavior: index 1 is AvgRef; any other index applies channel re-reference.
+output_reference_channel = strtrim(selected_output_reference_channel);
+
+[EEG, ~, ~, ~, ~, ~, ~, com] = GEDAI(EEG, artifact_threshold, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type, use_parallel, visualize_artifacts, ENOVA_threshold_per_epoch, ENOVA_threshold_per_channel, [], smoothing_window_seconds, output_reference_channel);
   
 EEG = eegh(com, EEG); % update EEG.history
     

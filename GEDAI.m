@@ -135,10 +135,21 @@ if nargin < 9 || isempty(ENOVA_threshold_per_channel)
     ENOVA_threshold_per_channel = inf; % If empty, set to infinity to disable rejection
 end
 
-% Parse hidden internal argument (precomputed_ENOVA_per_epoch) for Pass 2 recursion
+% Parse hidden internal arguments:
+% 1) output reference channel label (char/string)
+% 2) precomputed_ENOVA_per_epoch (numeric vector) for Pass 2 recursion
 precomputed_ENOVA_per_epoch = [];
+output_reference_channel = '';
 if ~isempty(varargin)
-    precomputed_ENOVA_per_epoch = varargin{1};
+    for vargIdx = 1:length(varargin)
+        currentArg = varargin{vargIdx};
+        if (ischar(currentArg) || (isstring(currentArg) && isscalar(currentArg))) && isempty(output_reference_channel)
+            output_reference_channel = char(currentArg);
+        elseif isnumeric(currentArg) && ~isscalar(currentArg) && isempty(precomputed_ENOVA_per_epoch)
+            precomputed_ENOVA_per_epoch = currentArg;
+        end
+    end
+    output_reference_channel = strtrim(output_reference_channel);
 end
 if nargin < 10 || isempty(signal_type)
     signal_type = 'eeg';
@@ -237,7 +248,7 @@ if ENOVA_threshold_per_channel < inf
         % --- PASS 2 ---
         disp([newline '--- PASS 2: Processing reduced data with global epoch thresholds ---']);
         [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band] = ...
-            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, smoothing_window_seconds, ENOVA_per_epoch_p1);
+            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, smoothing_window_seconds, output_reference_channel, ENOVA_per_epoch_p1);
         
         % --- INTERPOLATION ---
         disp([newline '--- INTERPOLATING BAD CHANNELS ---']);
@@ -349,8 +360,20 @@ if ENOVA_threshold_per_channel < inf
         else
             ref_matrix_type_str = ref_matrix_type;
         end
-        com = sprintf('EEG = GEDAI(EEG, ''%s'', %s,  %s, ''%s'', %d,  %d, %s, %s, ''%s'');', ...
-            artifact_threshold_type, num2str(epoch_size_in_cycles), num2str(lowcut_frequency), ref_matrix_type_str, parallel, visualize_artifacts, num2str(ENOVA_threshold_per_epoch), num2str(ENOVA_threshold_per_channel), signal_type);
+        if isempty(output_reference_channel)
+            com = sprintf('EEG = GEDAI(EEG, ''%s'', %s,  %s, ''%s'', %d,  %d, %s, %s, ''%s'');', ...
+                artifact_threshold_type, num2str(epoch_size_in_cycles), num2str(lowcut_frequency), ref_matrix_type_str, parallel, visualize_artifacts, num2str(ENOVA_threshold_per_epoch), num2str(ENOVA_threshold_per_channel), signal_type);
+        else
+            com = sprintf('EEG = GEDAI(EEG, ''%s'', %s,  %s, ''%s'', %d,  %d, %s, %s, ''%s'', %s, ''%s'');', ...
+                artifact_threshold_type, num2str(epoch_size_in_cycles), num2str(lowcut_frequency), ref_matrix_type_str, parallel, visualize_artifacts, num2str(ENOVA_threshold_per_epoch), num2str(ENOVA_threshold_per_channel), signal_type, num2str(smoothing_window_seconds), output_reference_channel);
+        end
+
+        % Optional output re-reference to a user-specified channel label
+        [EEGclean, applied_reference_label] = GEDAI_apply_output_reference(EEGclean, output_reference_channel);
+        if ~isempty(applied_reference_label)
+            EEGartifacts = GEDAI_apply_output_reference(EEGartifacts, applied_reference_label);
+            EEGclean.etc.GEDAI.output_reference_channel = applied_reference_label;
+        end
         EEGclean = eegh(com, EEGclean);
         
         % --- FINAL VISUALIZATIONS ON FULL INTERPOLATED DATA ---
@@ -973,8 +996,13 @@ tEnd = toc(tStart);
 if ~ischar(ref_matrix_type)
     ref_matrix_type = 'custom';
 end
-com = sprintf('EEG = GEDAI(EEG, ''%s'', %s,  %s, ''%s'', %d,  %d, %s, %s, ''%s'');', ...
-    artifact_threshold_type, num2str(epoch_size_in_cycles), num2str(lowcut_frequency), ref_matrix_type, parallel, visualize_artifacts, num2str(ENOVA_threshold_per_epoch), num2str(ENOVA_threshold_per_channel), signal_type);
+if isempty(output_reference_channel)
+    com = sprintf('EEG = GEDAI(EEG, ''%s'', %s,  %s, ''%s'', %d,  %d, %s, %s, ''%s'');', ...
+        artifact_threshold_type, num2str(epoch_size_in_cycles), num2str(lowcut_frequency), ref_matrix_type, parallel, visualize_artifacts, num2str(ENOVA_threshold_per_epoch), num2str(ENOVA_threshold_per_channel), signal_type);
+else
+    com = sprintf('EEG = GEDAI(EEG, ''%s'', %s,  %s, ''%s'', %d,  %d, %s, %s, ''%s'', %s, ''%s'');', ...
+        artifact_threshold_type, num2str(epoch_size_in_cycles), num2str(lowcut_frequency), ref_matrix_type, parallel, visualize_artifacts, num2str(ENOVA_threshold_per_epoch), num2str(ENOVA_threshold_per_channel), signal_type, num2str(smoothing_window_seconds), output_reference_channel);
+end
 
 if visualize_artifacts
     EEGclean_for_vis = EEGclean;
@@ -1277,4 +1305,48 @@ if is_epoched
     end
 end
 
+% Optional output re-reference to a user-specified channel label
+[EEGclean, applied_reference_label] = GEDAI_apply_output_reference(EEGclean, output_reference_channel);
+if ~isempty(applied_reference_label)
+    EEGartifacts = GEDAI_apply_output_reference(EEGartifacts, applied_reference_label);
+    EEGclean.etc.GEDAI.output_reference_channel = applied_reference_label;
+end
+
+end
+
+function [EEG, applied_reference_label] = GEDAI_apply_output_reference(EEG, output_reference_channel)
+applied_reference_label = '';
+
+if isempty(output_reference_channel)
+    return;
+end
+
+if isstring(output_reference_channel)
+    output_reference_channel = char(output_reference_channel);
+end
+output_reference_channel = strtrim(output_reference_channel);
+if isempty(output_reference_channel)
+    return;
+end
+
+if ~isfield(EEG, 'chanlocs') || isempty(EEG.chanlocs)
+    warning('GEDAI:ReferenceChannelNotFound', 'Cannot re-reference output: channel locations are missing.');
+    return;
+end
+
+channel_labels = {EEG.chanlocs.labels};
+reference_idx = find(strcmpi(channel_labels, output_reference_channel), 1);
+if isempty(reference_idx)
+    warning('GEDAI:ReferenceChannelNotFound', 'Output reference channel "%s" was not found. Returning average-referenced output.', output_reference_channel);
+    return;
+end
+
+% Re-reference by subtracting the selected channel from all channels.
+EEG.data = bsxfun(@minus, EEG.data, EEG.data(reference_idx, :, :));
+applied_reference_label = EEG.chanlocs(reference_idx).labels;
+
+EEG.ref = applied_reference_label;
+for chIdx = 1:EEG.nbchan
+    EEG.chanlocs(chIdx).ref = applied_reference_label;
+end
 end
