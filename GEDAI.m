@@ -666,7 +666,7 @@ if ~isempty(bands_to_zero)
             low_freq_noise = zeros(size(data_cpu), 'like', data_cpu);
             for b = 1:length(bands_to_zero)
                 band_idx = bands_to_zero(b);
-                low_freq_noise = low_freq_noise + modwt_single_band(data_cpu, wavelet_type, hp_wavelet_levels, band_idx);
+                low_freq_noise = low_freq_noise + stateful_modwt_single_band(data_cpu, wavelet_type, hp_wavelet_levels, band_idx);
             end
             
             EEGavRef.data = EEGavRef.data - low_freq_noise';
@@ -678,7 +678,7 @@ if ~isempty(bands_to_zero)
             low_freq_noise = zeros(size(data_cpu), 'like', data_cpu);
             for b = 1:length(bands_to_zero)
                 band_idx = bands_to_zero(b);
-                low_freq_noise = low_freq_noise + modwt_single_band(data_cpu, wavelet_type, hp_wavelet_levels, band_idx);
+                low_freq_noise = low_freq_noise + stateful_modwt_single_band(data_cpu, wavelet_type, hp_wavelet_levels, band_idx);
             end
             
             EEGavRef.data = EEGavRef.data - double(low_freq_noise');
@@ -815,7 +815,7 @@ if parallel
         % MEMORY OPTIMIZED: Incremental band extraction in parallel
         parfor f = 1:num_bands_to_process
             % Extract single band on-the-fly (no full wpt_EEG storage)
-            wavelet_data_band = modwt_single_band(unfiltered_data, wavelet_type, actual_decomposition_level, f)';
+            wavelet_data_band = stateful_modwt_single_band(unfiltered_data, wavelet_type, actual_decomposition_level, f)';
             
             current_epoch_size = epoch_sizes_per_wavelet_band(f);
             
@@ -862,7 +862,7 @@ if ~parallel || ~success_parallel
         % MEMORY OPTIMIZED: Sequential processing with incremental band extraction
         for f = 1:num_bands_to_process
             % Extract single band on-the-fly (no full wpt_EEG storage)
-            wavelet_data_band = modwt_single_band(unfiltered_data, wavelet_type, actual_decomposition_level, f)';
+            wavelet_data_band = stateful_modwt_single_band(unfiltered_data, wavelet_type, actual_decomposition_level, f)';
             
             current_epoch_size = epoch_sizes_per_wavelet_band(f);
             
@@ -901,7 +901,7 @@ if ~parallel || ~success_parallel
          disp('Executing Last Resort: Single Precision Non-Parallel Processing...');
          for f = 1:num_bands_to_process
             % Extract single band on-the-fly (no full wpt_EEG storage)
-            wavelet_data_band = modwt_single_band(single(unfiltered_data), wavelet_type, actual_decomposition_level, f)';
+            wavelet_data_band = stateful_modwt_single_band(single(unfiltered_data), wavelet_type, actual_decomposition_level, f)';
             current_epoch_size = epoch_sizes_per_wavelet_band(f);
             
             % Determine minThreshold based on signal type and frequency

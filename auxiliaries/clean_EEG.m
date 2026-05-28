@@ -11,12 +11,19 @@
 % For any questions, please contact:
 % dr.t.ros@gmail.com
 
-function [cleaned_data, artifacts_data, artifact_threshold_out] = clean_EEG(EEGdata_epoched, srate, epoch_size, artifact_threshold_in, refCOV, Eval, Evec, cosine_weights, signal_type)
+function [cleaned_data, artifacts_data, artifact_threshold_out] = clean_EEG(EEGdata_epoched, srate, epoch_size, artifact_threshold_in, refCOV, Eval, Evec, cosine_weights, signal_type, global_start_epoch_idx, global_total_epochs)
 %   This GEDAI function reconstructs the signal after removing artifactual components
 
 % --- PRE-ALLOCATION ---
 num_chans = size(Eval, 1);
 num_epochs = size(Eval, 3);
+
+if nargin < 10 || isempty(global_start_epoch_idx)
+    global_start_epoch_idx = 1;
+end
+if nargin < 11 || isempty(global_total_epochs)
+    global_total_epochs = num_epochs;
+end
 % Pre-allocate the array 
 all_diagonals = zeros(num_chans * num_epochs, 1, 'like', Eval);
 for i = 1:num_epochs
@@ -91,11 +98,12 @@ for i = 1:num_epochs
     cleaned_epoch = EEGdata_epoched(:,:,i) - Signal_to_remove;
     
     % Apply cosine windowing to mitigate edge effects from epoching
-    if i == 1
+    global_idx = global_start_epoch_idx + i - 1;
+    if global_idx == 1
         cleaned_epoch(:, half_epoch+1:end) = cleaned_epoch(:, half_epoch+1:end) .* cosine_weights(:, half_epoch+1:end);
         artifacts(:, :, i) = artifacts(:, :, i); % Copy first
         artifacts(:, half_epoch+1:end, i) = artifacts(:, half_epoch+1:end, i) .* cosine_weights(:, half_epoch+1:end);
-    elseif i == num_epochs
+    elseif global_idx == global_total_epochs
         cleaned_epoch(:, 1:half_epoch) = cleaned_epoch(:, 1:half_epoch) .* cosine_weights(:, 1:half_epoch);
         artifacts(:, 1:half_epoch, i) = artifacts(:, 1:half_epoch, i) .* cosine_weights(:, 1:half_epoch);
     else

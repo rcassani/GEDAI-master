@@ -46,6 +46,11 @@ if nargin < 11 || isempty(maxThreshold)
     maxThreshold = 12;
 end
 
+% Default smoothing_window_seconds if not provided
+if nargin < 12 || isempty(smoothing_window_seconds)
+    smoothing_window_seconds = Inf;
+end
+
 %% Pad and Epoch Data
 pnts_original = size(eeg_data, 2); 
 epoch_samples = round(srate * epoch_size);
@@ -67,272 +72,571 @@ shifting = epoch_samples / 2;
 eeg_data_2 = eeg_data(:, (shifting+1):(end-shifting));
 EEGdata_epoched_2 = reshape(eeg_data_2, N_EEG_electrodes, epoch_samples, []);
 [~,~,N_epochs] = size(EEGdata_epoched);
-%% Calculate Covariance Matrix per Epoch
-COV = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
-COV_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
-for epo=1:N_epochs-1
-    COV(:,:,epo) = cov(EEGdata_epoched(:,:,epo)');
-    COV_2(:,:,epo) = cov(EEGdata_epoched_2(:,:,epo)');
-end
-COV(:,:,N_epochs) = cov(EEGdata_epoched(:,:,N_epochs)');
-%% Generalized Eigendecomposition (GEVD)
-regularization_lambda = 0.05;
-reg_val = trace(refCOV) / N_EEG_electrodes;
-refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(N_EEG_electrodes, 'like', refCOV);
-refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
-Evec = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
-Eval = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
-Evec_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
-Eval_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
-for i=1:N_epochs-1
-    COV(:,:,i) = (COV(:,:,i) + COV(:,:,i)') / 2;
-    [Evec(:,:,i), Eval(:,:,i)] = eig(COV(:,:,i), refCOV_reg, 'chol');
-    COV_2(:,:,i) = (COV_2(:,:,i) + COV_2(:,:,i)') / 2;
-    [Evec_2(:,:,i), Eval_2(:,:,i)] = eig(COV_2(:,:,i), refCOV_reg, 'chol');
-end
-COV(:,:,N_epochs) = (COV(:,:,N_epochs) + COV(:,:,N_epochs)') / 2;
-[Evec(:,:,N_epochs), Eval(:,:,N_epochs)] = eig(COV(:,:,N_epochs), refCOV_reg, 'chol');
-
-
-%% Determine Artifact Threshold and Clean EEG
-%% Determine Noise Multiplier and Optimization Parameters
-if ischar(artifact_threshold_type) && startsWith(artifact_threshold_type, 'auto')
-    if strcmp(artifact_threshold_type,'auto+'), noise_multiplier = 1.5;
-    elseif strcmp(artifact_threshold_type,'auto'), noise_multiplier = 3;
-    elseif strcmp(artifact_threshold_type,'auto-'), noise_multiplier = 6;
-    else, noise_multiplier = 3; 
+if ~isinf(smoothing_window_seconds)
+    % =========================================================================
+    % MEMORY-OPTIMIZED SLIDING WINDOW PATH
+    % =========================================================================
+    disp('Executing Sliding Window GEVD Denoising...');
+    
+    window_seconds = smoothing_window_seconds;
+    window_epochs = max(1, round(window_seconds / epoch_size));
+    step_epochs = max(1, round(window_epochs / 2));
+    
+    num_windows = max(1, ceil((N_epochs - window_epochs) / step_epochs) + 1);
+    if N_epochs <= window_epochs
+        num_windows = 1;
+        window_epochs = N_epochs;
     end
-else
-    % Numeric input defines noise_multiplier linkage
-    if isnumeric(artifact_threshold_type)
-        val = artifact_threshold_type;
+    
+    window_centers = zeros(1, num_windows);
+    optimal_threshold_per_window = zeros(1, num_windows);
+    
+    regularization_lambda = 0.05;
+    reg_val = trace(refCOV) / N_EEG_electrodes;
+    refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(N_EEG_electrodes, 'like', refCOV);
+    refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
+    
+    % --- Determine Noise Multiplier and Optimization Parameters ---
+    if ischar(artifact_threshold_type) && startsWith(artifact_threshold_type, 'auto')
+        if strcmp(artifact_threshold_type,'auto+'), noise_multiplier = 1.5;
+        elseif strcmp(artifact_threshold_type,'auto'), noise_multiplier = 3;
+        elseif strcmp(artifact_threshold_type,'auto-'), noise_multiplier = 6;
+        else, noise_multiplier = 3; 
+        end
     else
-        val = str2double(artifact_threshold_type);
+        if isnumeric(artifact_threshold_type)
+            val = artifact_threshold_type;
+        else
+            val = str2double(artifact_threshold_type);
+        end
+        noise_multiplier = 10 - val;
     end
-    noise_multiplier = 10 - val;
-end
-
-% Ensure valid multiplier
-if isnan(noise_multiplier), noise_multiplier = 3; end
-
-% --- Run SENSAI Optimization ---
-
-% Pre-calculate RefCOV eigenvectors for SENSAI
-
-
-if strcmpi(signal_type, 'eeg')
-   refCOV_top_PCs = 3;
-   SSI_top_PCs = 3;
-
-    % disp(['EEG  refCOV PCs: ' num2str(refCOV_top_PCs)]);
-    % disp(['EEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
-
-elseif strcmpi(signal_type, 'meg')
-
-        % Adaptive: minimum PCs explaining >= 70% of refCOV variance
-        % Use refCOV_reg (regularized, always well-conditioned)
+    if isnan(noise_multiplier), noise_multiplier = 3; end
+    
+    % Pre-calculate RefCOV eigenvectors for SENSAI
+    if strcmpi(signal_type, 'eeg')
+        refCOV_top_PCs = 3;
+        SSI_top_PCs = 3;
+    elseif strcmpi(signal_type, 'meg')
         all_evals_refCOV = eig(refCOV_reg);
         all_evals_refCOV = sort(all_evals_refCOV, 'descend');
         cumvar_refCOV = cumsum(all_evals_refCOV) / sum(all_evals_refCOV);
         refCOV_top_PCs = find(cumvar_refCOV >= 0.85, 1, 'first');
         refCOV_top_PCs = max(1, min(refCOV_top_PCs, N_EEG_electrodes - 1));
-        % fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
-
-    % Top PCs for SSI (separate from refCOV top PCs)
         SSI_top_PCs = 4;
-    % disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
-end
-
-if refCOV_top_PCs < SSI_top_PCs
-    warning('GEDAI:LowRefCOVPCs', 'refCOV variance appears to be concentrated in too few principal components. Verify that leadfield matrix is well constructed.');
-end
-
-
-% Apply refCOV_top_PCs
-    % Use exact eig decomposition and sort to ensure stability and reproducibility
+    end
+    
     [Vs, Ds] = eig(refCOV_reg);
     [~, sidxS_Template_cov] = sort(diag(Ds), 'descend');
     evecs_Template_cov = Vs(:, sidxS_Template_cov(1:refCOV_top_PCs));
-
-
-% --- Optimization Method Switch (Sliding Window) ---
-% smoothing_window_seconds controls the sliding window size.
-% Inf (default) means use the entire file as one window (no sliding = original global behavior).
-if nargin < 12 || isempty(smoothing_window_seconds)
-    smoothing_window_seconds = Inf;
-end
-if isinf(smoothing_window_seconds)
-    window_seconds = N_epochs * epoch_size; % effectively the whole file
-else
-    window_seconds = smoothing_window_seconds;
-end
-window_epochs = max(1, round(window_seconds / epoch_size));
-step_epochs = max(1, round(window_epochs / 2));
-
-num_windows = max(1, ceil((N_epochs - window_epochs) / step_epochs) + 1);
-if N_epochs <= window_epochs
-    num_windows = 1;
-    window_epochs = N_epochs;
-end
-
-window_centers = zeros(1, num_windows);
-optimal_threshold_per_window = zeros(1, num_windows);
-
-for w = 1:num_windows
-    idx_start = (w - 1) * step_epochs + 1;
-    idx_end = min(N_epochs, idx_start + window_epochs - 1);
     
-    % Ensure the last window is reasonably sized
-    if w == num_windows && (idx_end - idx_start + 1) < window_epochs/2 && num_windows > 1
-        idx_start = max(1, N_epochs - window_epochs + 1);
-        idx_end = N_epochs;
-    end
-    
-    window_centers(w) = (idx_start + idx_end) / 2;
-    
-    Eval_sub = Eval(:,:,idx_start:idx_end);
-    Evec_sub = Evec(:,:,idx_start:idx_end);
-    COV_sub = COV(:,:,idx_start:idx_end);
-    
-    switch optimization_type
-        case 'parabolic'
-            [optimal_artifact_threshold] = SENSAI_fminbnd(minThreshold, maxThreshold, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+    % Loop over local windows to optimize threshold curves
+    for w = 1:num_windows
+        idx_start = (w - 1) * step_epochs + 1;
+        idx_end = min(N_epochs, idx_start + window_epochs - 1);
+        if w == num_windows && (idx_end - idx_start + 1) < window_epochs/2 && num_windows > 1
+            idx_start = max(1, N_epochs - window_epochs + 1);
+            idx_end = N_epochs;
+        end
+        window_centers(w) = (idx_start + idx_end) / 2;
         
-        case 'grid' % Restored grid search functionality
-            automatic_thresholding_step_size = 1/3;
-            AutomaticThresholdSweep = minThreshold:automatic_thresholding_step_size:maxThreshold;
-            
-            SIGNAL_subspace_similarity = zeros(1, length(AutomaticThresholdSweep));
-            NOISE_subspace_similarity = zeros(1, length(AutomaticThresholdSweep));
-            SENSAI_score = zeros(1, length(AutomaticThresholdSweep));
-            if parallel
-                parfor threshold_index=1:length(AutomaticThresholdSweep)
-                    artifact_threshold_iter = AutomaticThresholdSweep(threshold_index);
-                    % Call SENSAI function
-                    [SIGNAL_subspace_similarity(threshold_index), NOISE_subspace_similarity(threshold_index), SENSAI_score(threshold_index)] = SENSAI(artifact_threshold_iter, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
-                end
-            else
-                for threshold_index=1:length(AutomaticThresholdSweep)
-                    artifact_threshold_iter = AutomaticThresholdSweep(threshold_index);
-                    % Call SENSAI function
-                    [SIGNAL_subspace_similarity(threshold_index), NOISE_subspace_similarity(threshold_index), SENSAI_score(threshold_index)] = SENSAI(artifact_threshold_iter, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
-                end
-            end
-            [~, SENSAI_index] = max(SENSAI_score);
-            NOISE_changepoint_index = findchangepts(diff(smoothdata(NOISE_subspace_similarity, "movmean",6)),Statistic="mean", MaxNumChanges=2);
+        w_len = idx_end - idx_start + 1;
+        start_sample = (idx_start - 1) * epoch_samples + 1;
+        end_sample = idx_end * epoch_samples;
         
-            if isempty(NOISE_changepoint_index)
-                NOISE_changepoint_index = length(AutomaticThresholdSweep);      
-            end
-            if SENSAI_index > NOISE_changepoint_index(1)
-                optimal_artifact_threshold = AutomaticThresholdSweep(NOISE_changepoint_index(1));
-            else
-                optimal_artifact_threshold = AutomaticThresholdSweep(SENSAI_index);
-            end
+        eeg_data_sub = eeg_data(:, start_sample:end_sample);
+        EEGdata_epoched_sub = reshape(eeg_data_sub, N_EEG_electrodes, epoch_samples, w_len);
+        
+        COV_sub = zeros(N_EEG_electrodes, N_EEG_electrodes, w_len, 'like', eeg_data);
+        for epo = 1:w_len
+            COV_sub(:,:,epo) = cov(EEGdata_epoched_sub(:,:,epo)');
+        end
+        
+        Evec_sub = zeros(N_EEG_electrodes, N_EEG_electrodes, w_len, 'like', eeg_data);
+        Eval_sub = zeros(N_EEG_electrodes, N_EEG_electrodes, w_len, 'like', eeg_data);
+        for i = 1:w_len
+            COV_sub(:,:,i) = (COV_sub(:,:,i) + COV_sub(:,:,i)') / 2;
+            [Evec_sub(:,:,i), Eval_sub(:,:,i)] = eig(COV_sub(:,:,i), refCOV_reg, 'chol');
+        end
+        
+        switch optimization_type
+            case 'parabolic'
+                [optimal_artifact_threshold] = SENSAI_fminbnd(minThreshold, maxThreshold, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+            case 'grid'
+                automatic_thresholding_step_size = 1/3;
+                AutomaticThresholdSweep = minThreshold:automatic_thresholding_step_size:maxThreshold;
+                SIGNAL_subspace_similarity = zeros(1, length(AutomaticThresholdSweep));
+                NOISE_subspace_similarity = zeros(1, length(AutomaticThresholdSweep));
+                SENSAI_score_sweep = zeros(1, length(AutomaticThresholdSweep));
+                if parallel
+                    parfor threshold_index=1:length(AutomaticThresholdSweep)
+                        artifact_threshold_iter = AutomaticThresholdSweep(threshold_index);
+                        [SIGNAL_subspace_similarity(threshold_index), NOISE_subspace_similarity(threshold_index), SENSAI_score_sweep(threshold_index)] = SENSAI(artifact_threshold_iter, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+                    end
+                else
+                    for threshold_index=1:length(AutomaticThresholdSweep)
+                        artifact_threshold_iter = AutomaticThresholdSweep(threshold_index);
+                        [SIGNAL_subspace_similarity(threshold_index), NOISE_subspace_similarity(threshold_index), SENSAI_score_sweep(threshold_index)] = SENSAI(artifact_threshold_iter, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+                    end
+                end
+                [~, SENSAI_index] = max(SENSAI_score_sweep);
+                NOISE_changepoint_index = findchangepts(diff(smoothdata(NOISE_subspace_similarity, "movmean",6)),Statistic="mean", MaxNumChanges=2);
+                if isempty(NOISE_changepoint_index)
+                    NOISE_changepoint_index = length(AutomaticThresholdSweep);      
+                end
+                if SENSAI_index > NOISE_changepoint_index(1)
+                    optimal_artifact_threshold = AutomaticThresholdSweep(NOISE_changepoint_index(1));
+                else
+                    optimal_artifact_threshold = AutomaticThresholdSweep(SENSAI_index);
+                end
+        end
+        optimal_threshold_per_window(w) = optimal_artifact_threshold;
+        
+        clear eeg_data_sub EEGdata_epoched_sub COV_sub Evec_sub Eval_sub;
     end
-    optimal_threshold_per_window(w) = optimal_artifact_threshold;
-end
-
-if num_windows > 1
-    % Smooth per-window thresholds before interpolation.
-    % The SENSAI optimizer can return different values for adjacent windows
-    % even when data hasn't changed much. A moving average over 3 windows
-    % dampens these spurious jumps while preserving real trends.
-    if num_windows >= 3
-        optimal_threshold_per_window = smoothdata(optimal_threshold_per_window, 'movmean', 3);
-    end
     
-    % Clamp edges to first/last (smoothed) window values — fully local
-    padded_centers    = [1, window_centers, N_epochs];
-    padded_thresholds = [optimal_threshold_per_window(1), optimal_threshold_per_window, optimal_threshold_per_window(end)];
-    
-    % Ensure unique knot points
-    [unique_centers, unique_idx] = unique(padded_centers);
-    unique_thresholds = padded_thresholds(unique_idx);
-    
-    artifact_threshold_array = interp1(unique_centers, unique_thresholds, 1:N_epochs, 'makima');
-else
-    artifact_threshold_array = repmat(optimal_threshold_per_window, 1, N_epochs);
-end
-
-% Ensure bounds
-artifact_threshold_array = max(minThreshold, min(maxThreshold, artifact_threshold_array));
-artifact_threshold = artifact_threshold_array;
-% Pre-calculate cosine weights for efficiency
-cosine_weights = create_cosine_weights(N_EEG_electrodes, srate, epoch_size, 1);
-
-artifact_threshold_2 = (artifact_threshold(1:end-1) + artifact_threshold(2:end)) / 2;
-if isempty(artifact_threshold_2)
-    artifact_threshold_2 = artifact_threshold; % Fallback for 1-epoch edge case
-end
-
-[cleaned_data_1, artifacts_data_1, artifact_threshold_out] = clean_EEG(EEGdata_epoched, srate, epoch_size, artifact_threshold, refCOV, Eval, Evec, cosine_weights, signal_type);
-[cleaned_data_2, artifacts_data_2, ~] = clean_EEG(EEGdata_epoched_2, srate, epoch_size, artifact_threshold_2, refCOV, Eval_2, Evec_2, cosine_weights, signal_type);
-
-% Clear Stream 2 inputs as they are no longer needed
-clear EEGdata_epoched_2 Evec_2 Eval_2 COV_2;
-
-%% Combine the two processed streams using cosine weighting
-% cosine_weights is already calculated
-
-size_reconstructed_2 = size(cleaned_data_2, 2);
-sample_end = size_reconstructed_2 - shifting;
-% Apply weights to the second (shifted) stream
-cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
-cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
-artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
-artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
-
-% Combine streams (Optimize memory by clearing variables)
-cleaned_data = cleaned_data_1;
-clear cleaned_data_1; % Release memory
-
-artifacts_data = artifacts_data_1;
-clear artifacts_data_1; % Release memory
-
-cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
-clear cleaned_data_2; % Release memory
-
-artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
-clear artifacts_data_2; % Release memory
-
-% Remove padding to restore original data length
-cleaned_data = cleaned_data(:, 1:pnts_original);
-artifacts_data = artifacts_data(:, 1:pnts_original);
-
-%% Calculate final SENSAI score
-[~, ~, SENSAI_score] = SENSAI(mean(artifact_threshold_out), refCOV, Eval, Evec, noise_multiplier, COV, evecs_Template_cov, signal_type, SSI_top_PCs);
-
-% Calculate mean ENOVA for this band (average of per-epoch variance ratios)
-original_data = cleaned_data + artifacts_data;
-
-% Reshape into epochs (channels x samples x epochs)
-epoch_samples = round(srate * epoch_size);
-% Handle potential padding/truncation: use floor to get full epochs
-num_epochs_possible = floor(size(original_data, 2) / epoch_samples);
-len_to_use = num_epochs_possible * epoch_samples;
-
-original_epoched = reshape(original_data(:, 1:len_to_use), size(original_data, 1), epoch_samples, []);
-artifacts_epoched = reshape(artifacts_data(:, 1:len_to_use), size(artifacts_data, 1), epoch_samples, []);
-
-num_epochs = size(original_epoched, 3);
-enova_per_epoch = zeros(1, num_epochs);
-
-for i = 1:num_epochs
-    % Calculate variance for this epoch (across all channels and time points in epoch)
-    var_orig = var(reshape(original_epoched(:,:,i), [], 1));
-    var_art = var(reshape(artifacts_epoched(:,:,i), [], 1));
-    
-    if var_orig > 0
-        enova_per_epoch(i) = var_art / var_orig;
+    if num_windows > 1
+        if num_windows >= 3
+            optimal_threshold_per_window = smoothdata(optimal_threshold_per_window, 'movmean', 3);
+        end
+        padded_centers    = [1, window_centers, N_epochs];
+        padded_thresholds = [optimal_threshold_per_window(1), optimal_threshold_per_window, optimal_threshold_per_window(end)];
+        [unique_centers, unique_idx] = unique(padded_centers);
+        unique_thresholds = padded_thresholds(unique_idx);
+        artifact_threshold_array = interp1(unique_centers, unique_thresholds, 1:N_epochs, 'makima');
     else
-        enova_per_epoch(i) = 0; % Avoid division by zero
+        artifact_threshold_array = repmat(optimal_threshold_per_window, 1, N_epochs);
     end
-end
-
-if num_epochs > 0
-    ENOVA = mean(enova_per_epoch);
+    artifact_threshold_array = max(minThreshold, min(maxThreshold, artifact_threshold_array));
+    
+    artifact_threshold = artifact_threshold_array;
+    cosine_weights = create_cosine_weights(N_EEG_electrodes, srate, epoch_size, 1);
+    
+    artifact_threshold_2 = (artifact_threshold(1:end-1) + artifact_threshold(2:end)) / 2;
+    if isempty(artifact_threshold_2)
+        artifact_threshold_2 = artifact_threshold;
+    end
+    
+    % Pre-allocate outputs for chunked execution
+    cleaned_data_1 = zeros(N_EEG_electrodes, N_epochs * epoch_samples, 'like', eeg_data);
+    artifacts_data_1 = zeros(N_EEG_electrodes, N_epochs * epoch_samples, 'like', eeg_data);
+    cleaned_data_2 = zeros(N_EEG_electrodes, (N_epochs - 1) * epoch_samples, 'like', eeg_data);
+    artifacts_data_2 = zeros(N_EEG_electrodes, (N_epochs - 1) * epoch_samples, 'like', eeg_data);
+    
+    SIGNAL_subspace_dist = zeros(1, N_epochs);
+    NOISE_subspace_dist = zeros(1, N_epochs);
+    Template_guess = evecs_Template_cov(:, 1:min(size(evecs_Template_cov, 2), SSI_top_PCs));
+    mean_thresh = mean(artifact_threshold_array);
+    
+    % Dynamically scale chunk size to cap memory at ~1000 seconds per chunk
+    chunk_size = max(1, min(500, round(1000 / epoch_size)));
+    num_chunks = ceil(N_epochs / chunk_size);
+    for chunk = 1:num_chunks
+        c_start = (chunk - 1) * chunk_size + 1;
+        c_end = min(N_epochs, chunk * chunk_size);
+        c_len = c_end - c_start + 1;
+        
+        chunk_samples_start = (c_start - 1) * epoch_samples + 1;
+        chunk_samples_end = c_end * epoch_samples;
+        eeg_data_chunk = eeg_data(:, chunk_samples_start:chunk_samples_end);
+        
+        EEGdata_epoched_chunk = reshape(eeg_data_chunk, N_EEG_electrodes, epoch_samples, c_len);
+        
+        COV_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
+        for epo = 1:c_len
+            COV_chunk(:,:,epo) = cov(EEGdata_epoched_chunk(:,:,epo)');
+        end
+        
+        Evec_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
+        Eval_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
+        for i = 1:c_len
+            COV_chunk(:,:,i) = (COV_chunk(:,:,i) + COV_chunk(:,:,i)') / 2;
+            [Evec_chunk(:,:,i), Eval_chunk(:,:,i)] = eig(COV_chunk(:,:,i), refCOV_reg, 'chol');
+        end
+        
+        chunk_threshold = artifact_threshold_array(c_start:c_end);
+        [cleaned_chunk, artifacts_chunk, artifact_threshold_out] = clean_EEG(EEGdata_epoched_chunk, srate, epoch_size, chunk_threshold, refCOV, Eval_chunk, Evec_chunk, cosine_weights, signal_type, c_start, N_epochs);
+        
+        cleaned_data_1(:, chunk_samples_start:chunk_samples_end) = cleaned_chunk;
+        artifacts_data_1(:, chunk_samples_start:chunk_samples_end) = artifacts_chunk;
+        
+        % Accumulate analytical SENSAI statistics locally
+        [cov_signal_chunk, cov_noise_chunk] = clean_SENSAI(mean_thresh, refCOV, Eval_chunk, Evec_chunk, COV_chunk, signal_type);
+        for i = 1:c_len
+            global_epo_idx = c_start + i - 1;
+            cov_signal = cov_signal_chunk(:,:,i);
+            Y1_sig = cov_signal * Template_guess;
+            [Q1_sig, ~] = qr(Y1_sig, 0);
+            Y2_sig = cov_signal * Q1_sig;
+            [evecs_signal, ~] = qr(Y2_sig, 0);
+            SIGNAL_subspace_dist(global_epo_idx) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
+            
+            cov_noise = cov_noise_chunk(:,:,i);
+            Y1_noise = cov_noise * Template_guess;
+            [Q1_noise, ~] = qr(Y1_noise, 0);
+            Y2_noise = cov_noise * Q1_noise;
+            [evecs_noise, ~] = qr(Y2_noise, 0);
+            NOISE_subspace_dist(global_epo_idx) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
+        end
+        
+        clear eeg_data_chunk EEGdata_epoched_chunk COV_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk cov_signal_chunk cov_noise_chunk;
+    end
+    
+    % Clean Shifted Stream 2 in Chunks
+    num_chunks_2 = ceil((N_epochs - 1) / chunk_size);
+    for chunk = 1:num_chunks_2
+        c_start = (chunk - 1) * chunk_size + 1;
+        c_end = min(N_epochs - 1, chunk * chunk_size);
+        c_len = c_end - c_start + 1;
+        
+        chunk_samples_start = (c_start - 1) * epoch_samples + 1;
+        chunk_samples_end = c_end * epoch_samples;
+        eeg_data_chunk = eeg_data_2(:, chunk_samples_start:chunk_samples_end);
+        
+        EEGdata_epoched_chunk = reshape(eeg_data_chunk, N_EEG_electrodes, epoch_samples, c_len);
+        
+        COV_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
+        for epo = 1:c_len
+            COV_chunk(:,:,epo) = cov(EEGdata_epoched_chunk(:,:,epo)');
+        end
+        
+        Evec_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
+        Eval_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
+        for i = 1:c_len
+            COV_chunk(:,:,i) = (COV_chunk(:,:,i) + COV_chunk(:,:,i)') / 2;
+            [Evec_chunk(:,:,i), Eval_chunk(:,:,i)] = eig(COV_chunk(:,:,i), refCOV_reg, 'chol');
+        end
+        
+        chunk_threshold = artifact_threshold_2(c_start:c_end);
+        [cleaned_chunk, artifacts_chunk] = clean_EEG(EEGdata_epoched_chunk, srate, epoch_size, chunk_threshold, refCOV, Eval_chunk, Evec_chunk, cosine_weights, signal_type, c_start, N_epochs - 1);
+        
+        cleaned_data_2(:, chunk_samples_start:chunk_samples_end) = cleaned_chunk;
+        artifacts_data_2(:, chunk_samples_start:chunk_samples_end) = artifacts_chunk;
+        
+        clear eeg_data_chunk EEGdata_epoched_chunk COV_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk;
+    end
+    
+    % Reconstruct overlapping segments
+    size_reconstructed_2 = size(cleaned_data_2, 2);
+    sample_end = size_reconstructed_2 - shifting;
+    cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+    cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+    artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    
+    cleaned_data = cleaned_data_1;
+    artifacts_data = artifacts_data_1;
+    clear cleaned_data_1 artifacts_data_1;
+    
+    cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
+    artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
+    clear cleaned_data_2 artifacts_data_2;
+    
+    cleaned_data = cleaned_data(:, 1:pnts_original);
+    artifacts_data = artifacts_data(:, 1:pnts_original);
+    
+    % Compute final SENSAI score from the tracked vectors
+    SIGNAL_subspace_similarity = 100 * mean(SIGNAL_subspace_dist);
+    NOISE_subspace_similarity = 100 * mean(NOISE_subspace_dist);
+    SENSAI_score = SIGNAL_subspace_similarity - (noise_multiplier * NOISE_subspace_similarity);
+    
+    artifact_threshold_out = artifact_threshold;
+    
+    % Analytical ENOVA calculation
+    original_data = cleaned_data + artifacts_data;
+    num_epochs_possible = floor(size(original_data, 2) / epoch_samples);
+    len_to_use = num_epochs_possible * epoch_samples;
+    original_epoched = reshape(original_data(:, 1:len_to_use), size(original_data, 1), epoch_samples, []);
+    artifacts_epoched = reshape(artifacts_data(:, 1:len_to_use), size(artifacts_data, 1), epoch_samples, []);
+    num_epochs_enova = size(original_epoched, 3);
+    enova_per_epoch = zeros(1, num_epochs_enova);
+    for i = 1:num_epochs_enova
+        var_orig = var(reshape(original_epoched(:,:,i), [], 1));
+        var_art = var(reshape(artifacts_epoched(:,:,i), [], 1));
+        if var_orig > 0
+            enova_per_epoch(i) = var_art / var_orig;
+        else
+            enova_per_epoch(i) = 0;
+        end
+    end
+    if num_epochs_enova > 0
+        ENOVA = mean(enova_per_epoch);
+    else
+        ENOVA = 0;
+    end
+    
 else
-    ENOVA = 0;
+    % =========================================================================
+    % ORIGINAL GLOBAL PATH (Fully backwards-compatible, unchanged)
+    % =========================================================================
+    
+    %% Calculate Covariance Matrix per Epoch
+    COV = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
+    COV_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
+    for epo=1:N_epochs-1
+        COV(:,:,epo) = cov(EEGdata_epoched(:,:,epo)');
+        COV_2(:,:,epo) = cov(EEGdata_epoched_2(:,:,epo)');
+    end
+    COV(:,:,N_epochs) = cov(EEGdata_epoched(:,:,N_epochs)');
+    %% Generalized Eigendecomposition (GEVD)
+    regularization_lambda = 0.05;
+    reg_val = trace(refCOV) / N_EEG_electrodes;
+    refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(N_EEG_electrodes, 'like', refCOV);
+    refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
+    Evec = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
+    Eval = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs, 'like', eeg_data);
+    Evec_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
+    Eval_2 = zeros(N_EEG_electrodes, N_EEG_electrodes, N_epochs-1, 'like', eeg_data);
+    for i=1:N_epochs-1
+        COV(:,:,i) = (COV(:,:,i) + COV(:,:,i)') / 2;
+        [Evec(:,:,i), Eval(:,:,i)] = eig(COV(:,:,i), refCOV_reg, 'chol');
+        COV_2(:,:,i) = (COV_2(:,:,i) + COV_2(:,:,i)') / 2;
+        [Evec_2(:,:,i), Eval_2(:,:,i)] = eig(COV_2(:,:,i), refCOV_reg, 'chol');
+    end
+    COV(:,:,N_epochs) = (COV(:,:,N_epochs) + COV(:,:,N_epochs)') / 2;
+    [Evec(:,:,N_epochs), Eval(:,:,N_epochs)] = eig(COV(:,:,N_epochs), refCOV_reg, 'chol');
+    
+    
+    %% Determine Artifact Threshold and Clean EEG
+    %% Determine Noise Multiplier and Optimization Parameters
+    if ischar(artifact_threshold_type) && startsWith(artifact_threshold_type, 'auto')
+        if strcmp(artifact_threshold_type,'auto+'), noise_multiplier = 1.5;
+        elseif strcmp(artifact_threshold_type,'auto'), noise_multiplier = 3;
+        elseif strcmp(artifact_threshold_type,'auto-'), noise_multiplier = 6;
+        else, noise_multiplier = 3; 
+        end
+    else
+        % Numeric input defines noise_multiplier linkage
+        if isnumeric(artifact_threshold_type)
+            val = artifact_threshold_type;
+        else
+            val = str2double(artifact_threshold_type);
+        end
+        noise_multiplier = 10 - val;
+    end
+    
+    % Ensure valid multiplier
+    if isnan(noise_multiplier), noise_multiplier = 3; end
+    
+    % --- Run SENSAI Optimization ---
+    
+    % Pre-calculate RefCOV eigenvectors for SENSAI
+    
+    
+    if strcmpi(signal_type, 'eeg')
+       refCOV_top_PCs = 3;
+       SSI_top_PCs = 3;
+    
+        % disp(['EEG  refCOV PCs: ' num2str(refCOV_top_PCs)]);
+        % disp(['EEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
+    
+    elseif strcmpi(signal_type, 'meg')
+    
+            % Adaptive: minimum PCs explaining >= 70% of refCOV variance
+            % Use refCOV_reg (regularized, always well-conditioned)
+            all_evals_refCOV = eig(refCOV_reg);
+            all_evals_refCOV = sort(all_evals_refCOV, 'descend');
+            cumvar_refCOV = cumsum(all_evals_refCOV) / sum(all_evals_refCOV);
+            refCOV_top_PCs = find(cumvar_refCOV >= 0.85, 1, 'first');
+            refCOV_top_PCs = max(1, min(refCOV_top_PCs, N_EEG_electrodes - 1));
+            % fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
+    
+        % Top PCs for SSI (separate from refCOV top PCs)
+            SSI_top_PCs = 4;
+        % disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
+    end
+    
+    if refCOV_top_PCs < SSI_top_PCs
+        warning('GEDAI:LowRefCOVPCs', 'refCOV variance appears to be concentrated in too few principal components. Verify that leadfield matrix is well constructed.');
+    end
+    
+    
+    % Apply refCOV_top_PCs
+        % Use exact eig decomposition and sort to ensure stability and reproducibility
+        [Vs, Ds] = eig(refCOV_reg);
+        [~, sidxS_Template_cov] = sort(diag(Ds), 'descend');
+        evecs_Template_cov = Vs(:, sidxS_Template_cov(1:refCOV_top_PCs));
+    
+    
+    % --- Optimization Method Switch (Sliding Window) ---
+    % smoothing_window_seconds controls the sliding window size.
+    % Inf (default) means use the entire file as one window (no sliding = original global behavior).
+    if nargin < 12 || isempty(smoothing_window_seconds)
+        smoothing_window_seconds = Inf;
+    end
+    if isinf(smoothing_window_seconds)
+        window_seconds = N_epochs * epoch_size; % effectively the whole file
+    else
+        window_seconds = smoothing_window_seconds;
+    end
+    window_epochs = max(1, round(window_seconds / epoch_size));
+    step_epochs = max(1, round(window_epochs / 2));
+    
+    num_windows = max(1, ceil((N_epochs - window_epochs) / step_epochs) + 1);
+    if N_epochs <= window_epochs
+        num_windows = 1;
+        window_epochs = N_epochs;
+    end
+    
+    window_centers = zeros(1, num_windows);
+    optimal_threshold_per_window = zeros(1, num_windows);
+    
+    for w = 1:num_windows
+        idx_start = (w - 1) * step_epochs + 1;
+        idx_end = min(N_epochs, idx_start + window_epochs - 1);
+        
+        % Ensure the last window is reasonably sized
+        if w == num_windows && (idx_end - idx_start + 1) < window_epochs/2 && num_windows > 1
+            idx_start = max(1, N_epochs - window_epochs + 1);
+            idx_end = N_epochs;
+        end
+        
+        window_centers(w) = (idx_start + idx_end) / 2;
+        
+        Eval_sub = Eval(:,:,idx_start:idx_end);
+        Evec_sub = Evec(:,:,idx_start:idx_end);
+        COV_sub = COV(:,:,idx_start:idx_end);
+        
+        switch optimization_type
+            case 'parabolic'
+                [optimal_artifact_threshold] = SENSAI_fminbnd(minThreshold, maxThreshold, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+            
+            case 'grid' % Restored grid search functionality
+                automatic_thresholding_step_size = 1/3;
+                AutomaticThresholdSweep = minThreshold:automatic_thresholding_step_size:maxThreshold;
+                
+                SIGNAL_subspace_similarity = zeros(1, length(AutomaticThresholdSweep));
+                NOISE_subspace_similarity = zeros(1, length(AutomaticThresholdSweep));
+                SENSAI_score = zeros(1, length(AutomaticThresholdSweep));
+                if parallel
+                    parfor threshold_index=1:length(AutomaticThresholdSweep)
+                        artifact_threshold_iter = AutomaticThresholdSweep(threshold_index);
+                        % Call SENSAI function
+                        [SIGNAL_subspace_similarity(threshold_index), NOISE_subspace_similarity(threshold_index), SENSAI_score(threshold_index)] = SENSAI(artifact_threshold_iter, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+                    end
+                else
+                    for threshold_index=1:length(AutomaticThresholdSweep)
+                        artifact_threshold_iter = AutomaticThresholdSweep(threshold_index);
+                        % Call SENSAI function
+                        [SIGNAL_subspace_similarity(threshold_index), NOISE_subspace_similarity(threshold_index), SENSAI_score(threshold_index)] = SENSAI(artifact_threshold_iter, refCOV, Eval_sub, Evec_sub, noise_multiplier, COV_sub, evecs_Template_cov, signal_type, SSI_top_PCs);
+                    end
+                end
+                [~, SENSAI_index] = max(SENSAI_score);
+                NOISE_changepoint_index = findchangepts(diff(smoothdata(NOISE_subspace_similarity, "movmean",6)),Statistic="mean", MaxNumChanges=2);
+            
+                if isempty(NOISE_changepoint_index)
+                    NOISE_changepoint_index = length(AutomaticThresholdSweep);      
+                end
+                if SENSAI_index > NOISE_changepoint_index(1)
+                    optimal_artifact_threshold = AutomaticThresholdSweep(NOISE_changepoint_index(1));
+                else
+                    optimal_artifact_threshold = AutomaticThresholdSweep(SENSAI_index);
+                end
+        end
+        optimal_threshold_per_window(w) = optimal_artifact_threshold;
+    end
+    
+    if num_windows > 1
+        % Smooth per-window thresholds before interpolation.
+        % The SENSAI optimizer can return different values for adjacent windows
+        % even when data hasn't changed much. A moving average over 3 windows
+        % dampens these spurious jumps while preserving real trends.
+        if num_windows >= 3
+            optimal_threshold_per_window = smoothdata(optimal_threshold_per_window, 'movmean', 3);
+        end
+        
+        % Clamp edges to first/last (smoothed) window values — fully local
+        padded_centers    = [1, window_centers, N_epochs];
+        padded_thresholds = [optimal_threshold_per_window(1), optimal_threshold_per_window, optimal_threshold_per_window(end)];
+        
+        % Ensure unique knot points
+        [unique_centers, unique_idx] = unique(padded_centers);
+        unique_thresholds = padded_thresholds(unique_idx);
+        
+        artifact_threshold_array = interp1(unique_centers, unique_thresholds, 1:N_epochs, 'makima');
+    else
+        artifact_threshold_array = repmat(optimal_threshold_per_window, 1, N_epochs);
+    end
+    
+    % Ensure bounds
+    artifact_threshold_array = max(minThreshold, min(maxThreshold, artifact_threshold_array));
+    artifact_threshold = artifact_threshold_array;
+    % Pre-calculate cosine weights for efficiency
+    cosine_weights = create_cosine_weights(N_EEG_electrodes, srate, epoch_size, 1);
+    
+    artifact_threshold_2 = (artifact_threshold(1:end-1) + artifact_threshold(2:end)) / 2;
+    if isempty(artifact_threshold_2)
+        artifact_threshold_2 = artifact_threshold; % Fallback for 1-epoch edge case
+    end
+    
+    [cleaned_data_1, artifacts_data_1, artifact_threshold_out] = clean_EEG(EEGdata_epoched, srate, epoch_size, artifact_threshold, refCOV, Eval, Evec, cosine_weights, signal_type);
+    [cleaned_data_2, artifacts_data_2, ~] = clean_EEG(EEGdata_epoched_2, srate, epoch_size, artifact_threshold_2, refCOV, Eval_2, Evec_2, cosine_weights, signal_type);
+    
+    % Clear Stream 2 inputs as they are no longer needed
+    clear EEGdata_epoched_2 Evec_2 Eval_2 COV_2;
+    
+    %% Combine the two processed streams using cosine weighting
+    % cosine_weights is already calculated
+    
+    size_reconstructed_2 = size(cleaned_data_2, 2);
+    sample_end = size_reconstructed_2 - shifting;
+    % Apply weights to the second (shifted) stream
+    cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+    cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+    artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    
+    % Combine streams (Optimize memory by clearing variables)
+    cleaned_data = cleaned_data_1;
+    clear cleaned_data_1; % Release memory
+    
+    artifacts_data = artifacts_data_1;
+    clear artifacts_data_1; % Release memory
+    
+    cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
+    clear cleaned_data_2; % Release memory
+    
+    artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
+    clear artifacts_data_2; % Release memory
+    
+    % Remove padding to restore original data length
+    cleaned_data = cleaned_data(:, 1:pnts_original);
+    artifacts_data = artifacts_data(:, 1:pnts_original);
+    
+    %% Calculate final SENSAI score
+    [~, ~, SENSAI_score] = SENSAI(mean(artifact_threshold_out), refCOV, Eval, Evec, noise_multiplier, COV, evecs_Template_cov, signal_type, SSI_top_PCs);
+    
+    % Calculate mean ENOVA for this band (average of per-epoch variance ratios)
+    original_data = cleaned_data + artifacts_data;
+    
+    % Reshape into epochs (channels x samples x epochs)
+    epoch_samples = round(srate * epoch_size);
+    % Handle potential padding/truncation: use floor to get full epochs
+    num_epochs_possible = floor(size(original_data, 2) / epoch_samples);
+    len_to_use = num_epochs_possible * epoch_samples;
+    
+    original_epoched = reshape(original_data(:, 1:len_to_use), size(original_data, 1), epoch_samples, []);
+    artifacts_epoched = reshape(artifacts_data(:, 1:len_to_use), size(artifacts_data, 1), epoch_samples, []);
+    
+    num_epochs_enova = size(original_epoched, 3);
+    enova_per_epoch = zeros(1, num_epochs_enova);
+    
+    for i = 1:num_epochs_enova
+        % Calculate variance for this epoch (across all channels and time points in epoch)
+        var_orig = var(reshape(original_epoched(:,:,i), [], 1));
+        var_art = var(reshape(artifacts_epoched(:,:,i), [], 1));
+        
+        if var_orig > 0
+            enova_per_epoch(i) = var_art / var_orig;
+        else
+            enova_per_epoch(i) = 0; % Avoid division by zero
+        end
+    end
+    
+    if num_epochs_enova > 0
+        ENOVA = mean(enova_per_epoch);
+    else
+        ENOVA = 0;
+    end
 end
 end
