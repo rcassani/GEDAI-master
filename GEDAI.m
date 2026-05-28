@@ -379,10 +379,15 @@ if ENOVA_threshold_per_channel < inf
         % --- FINAL VISUALIZATIONS ON FULL INTERPOLATED DATA ---
         if visualize_artifacts
             EEGclean_for_vis = EEGclean;
+            EEGin_for_vis = EEGin;
+            if ~isempty(output_reference_channel)
+                EEGclean_for_vis = GEDAI_apply_output_reference(EEGclean_for_vis, output_reference_channel);
+                EEGin_for_vis = GEDAI_apply_output_reference(EEGin_for_vis, output_reference_channel);
+            end
             if isfield(EEGclean.etc, 'GEDAI') && isfield(EEGclean.etc.GEDAI, 'samples_to_keep')
                 EEGclean_for_vis.etc.clean_sample_mask = EEGclean.etc.GEDAI.samples_to_keep;
             end
-            vis_artifacts(EEGclean_for_vis, EEGin, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGin.data(:)));
+            vis_artifacts(EEGclean_for_vis, EEGin_for_vis, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGin_for_vis.data(:)));
             
             % Plot sliding thresholds if applicable
             if smoothing_window_seconds ~= Inf && isfield(EEGclean.etc.GEDAI, 'artifact_threshold_array_per_band')
@@ -1006,6 +1011,11 @@ end
 
 if visualize_artifacts
     EEGclean_for_vis = EEGclean;
+    EEGavRef_for_vis = EEGavRef;
+    if ~isempty(output_reference_channel)
+        EEGclean_for_vis = GEDAI_apply_output_reference(EEGclean_for_vis, output_reference_channel);
+        EEGavRef_for_vis = GEDAI_apply_output_reference(EEGavRef_for_vis, output_reference_channel);
+    end
     if ~isempty(regions)
         clean_sample_mask = true(1, EEGclean_for_vis.pnts);
         for i = 1:size(regions, 1)
@@ -1015,7 +1025,7 @@ if visualize_artifacts
         EEGclean_for_vis.data = EEGclean_for_vis.data(:, clean_sample_mask);
         EEGclean_for_vis.pnts = size(EEGclean_for_vis.data, 2);
     end
-    vis_artifacts(EEGclean_for_vis, EEGavRef, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGavRef.data(:)));
+    vis_artifacts(EEGclean_for_vis, EEGavRef_for_vis, 'ScaleBy', 'noscale', 'YScaling', 3*mad(EEGavRef_for_vis.data(:)));
 end
 
 if ~isempty(regions)
