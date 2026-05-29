@@ -325,8 +325,24 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 end
                 [EEGclean_GRAD, EEGartifacts_GRAD] = GEDAI(EEG_GRAD, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_param_GRAD, parallel, visualize_artifacts, enova_threshold, enova_threshold_per_channel, signal_type);
 
+                target_length = size(sInputFiltered.A, 2);
+                mask_MAG = get_samples_to_keep_mask(EEGclean_MAG, target_length);
+                mask_GRAD = get_samples_to_keep_mask(EEGclean_GRAD, target_length);
+                combined_mask = mask_MAG & mask_GRAD;
+
+                [EEGclean_MAG, EEGartifacts_MAG] = align_gedai_outputs_to_mask(EEGclean_MAG, EEGartifacts_MAG, combined_mask, mask_MAG, 'MAG');
+                [EEGclean_GRAD, EEGartifacts_GRAD] = align_gedai_outputs_to_mask(EEGclean_GRAD, EEGartifacts_GRAD, combined_mask, mask_GRAD, 'GRAD');
+
                 % --- Recombine ---
                 EEGclean = brainstorm2eeglab(sInputFiltered, ChannelMatFiltered);
+                EEGclean.data = EEGclean.data(:, combined_mask);
+                EEGclean.pnts = size(EEGclean.data, 2);
+                EEGclean.xmax = EEGclean.xmin + (EEGclean.pnts - 1) / EEGclean.srate;
+                if EEGclean.pnts > 1
+                    EEGclean.times = linspace(EEGclean.xmin * 1000, EEGclean.xmax * 1000, EEGclean.pnts);
+                else
+                    EEGclean.times = EEGclean.xmin * 1000;
+                end
                 EEGclean.data(mag_idx_in_filtered, :)  = EEGclean_MAG.data;
                 EEGclean.data(grad_idx_in_filtered, :) = EEGclean_GRAD.data;
                 EEGartifacts = EEGclean;
@@ -334,22 +350,13 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 EEGartifacts.data(grad_idx_in_filtered, :) = EEGartifacts_GRAD.data;
 
                 % Combine rejection masks
-                if isfield(EEGclean_MAG.etc, 'GEDAI') && isfield(EEGclean_MAG.etc.GEDAI, 'samples_to_keep') && ...
-                   isfield(EEGclean_GRAD.etc, 'GEDAI') && isfield(EEGclean_GRAD.etc.GEDAI, 'samples_to_keep')
-                    mask_MAG  = EEGclean_MAG.etc.GEDAI.samples_to_keep;
-                    mask_GRAD = EEGclean_GRAD.etc.GEDAI.samples_to_keep;
-                    if length(mask_MAG) == length(mask_GRAD)
-                        combined_mask = mask_MAG & mask_GRAD;
-                        EEGclean.etc.GEDAI.samples_to_keep    = combined_mask;
-                        EEGclean.etc.GEDAI.percentage_rejected = 100 * sum(~combined_mask) / length(combined_mask);
-                    else
-                        EEGclean.etc.GEDAI = EEGclean_MAG.etc.GEDAI;
-                    end
-                elseif isfield(EEGclean_MAG.etc, 'GEDAI')
+                if isfield(EEGclean_MAG.etc, 'GEDAI')
                     EEGclean.etc.GEDAI = EEGclean_MAG.etc.GEDAI;
                 elseif isfield(EEGclean_GRAD.etc, 'GEDAI')
                     EEGclean.etc.GEDAI = EEGclean_GRAD.etc.GEDAI;
                 end
+                EEGclean.etc.GEDAI.samples_to_keep = combined_mask;
+                EEGclean.etc.GEDAI.percentage_rejected = 100 * sum(~combined_mask) / length(combined_mask);
 
             else
                 % Single processing (EEG or generic MEG)
@@ -535,6 +542,45 @@ function EEG = brainstorm2eeglab(sInput, ChannelMat)
             if ~isfield(EEG.chanlocs(i), 'urchan'),      EEG.chanlocs(i).urchan = i; end
             if ~isfield(EEG.chanlocs(i), 'ref'),         EEG.chanlocs(i).ref = ''; end
         end
+    end
+end
+
+function mask = get_samples_to_keep_mask(EEG, target_length)
+    mask = true(1, target_length);
+    if isfield(EEG, 'etc') && isfield(EEG.etc, 'GEDAI') && isfield(EEG.etc.GEDAI, 'samples_to_keep')
+        candidate_mask = logical(EEG.etc.GEDAI.samples_to_keep(:)');
+        if length(candidate_mask) == target_length
+            mask = candidate_mask;
+        else
+            warning('GEDAI:MaskLengthMismatch', 'Ignoring a GEDAI samples_to_keep mask with unexpected length.');
+        end
+    end
+end
+
+function [EEGclean, EEGartifacts] = align_gedai_outputs_to_mask(EEGclean, EEGartifacts, target_mask, source_mask, sensor_label)
+    if length(source_mask) ~= length(target_mask)
+        error('GEDAI:%sMaskMismatch', sensor_label, 'Sample masks must have the same length for recombination.');
+    end
+
+    selection_mask = target_mask(source_mask);
+    expected_columns = sum(source_mask);
+    if size(EEGclean.data, 2) ~= expected_columns || size(EEGartifacts.data, 2) ~= expected_columns
+        error('GEDAI:%sOutputMismatch', sensor_label, 'GEDAI output length does not match its rejection mask for %s sensors.', sensor_label);
+    end
+
+    EEGclean.data = EEGclean.data(:, selection_mask);
+    EEGartifacts.data = EEGartifacts.data(:, selection_mask);
+
+    EEGclean.pnts = size(EEGclean.data, 2);
+    EEGartifacts.pnts = size(EEGartifacts.data, 2);
+    EEGclean.xmax = EEGclean.xmin + (EEGclean.pnts - 1) / EEGclean.srate;
+    EEGartifacts.xmax = EEGartifacts.xmin + (EEGartifacts.pnts - 1) / EEGartifacts.srate;
+    if EEGclean.pnts > 1
+        EEGclean.times = linspace(EEGclean.xmin * 1000, EEGclean.xmax * 1000, EEGclean.pnts);
+        EEGartifacts.times = linspace(EEGartifacts.xmin * 1000, EEGartifacts.xmax * 1000, EEGartifacts.pnts);
+    else
+        EEGclean.times = EEGclean.xmin * 1000;
+        EEGartifacts.times = EEGartifacts.xmin * 1000;
     end
 end
 

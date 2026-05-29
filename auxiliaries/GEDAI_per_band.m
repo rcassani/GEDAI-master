@@ -58,8 +58,7 @@ epoch_samples = round(srate * epoch_size);
 remainder = rem(pnts_original, epoch_samples);
 if remainder ~= 0
     samples_to_pad = epoch_samples - remainder;
-    reflection_segment = eeg_data(:, end-samples_to_pad+1:end);
-    padding = fliplr(reflection_segment); % Flip the segment left-to-right
+    padding = local_reflect_pad(eeg_data, samples_to_pad);
     eeg_data = [eeg_data, padding];
     % disp(['Data padded with ', num2str(samples_to_pad/srate, '%.2f'), ' seconds of reflected data.']);
 end
@@ -115,15 +114,15 @@ if ~isinf(smoothing_window_seconds)
     
     % Pre-calculate RefCOV eigenvectors for SENSAI
     if strcmpi(signal_type, 'eeg')
-        refCOV_top_PCs = 3;
-        SSI_top_PCs = 3;
+        refCOV_top_PCs = min(3, N_EEG_electrodes);
+        SSI_top_PCs = refCOV_top_PCs;
     elseif strcmpi(signal_type, 'meg')
         all_evals_refCOV = eig(refCOV_reg);
         all_evals_refCOV = sort(all_evals_refCOV, 'descend');
         cumvar_refCOV = cumsum(all_evals_refCOV) / sum(all_evals_refCOV);
         refCOV_top_PCs = find(cumvar_refCOV >= 0.85, 1, 'first');
         refCOV_top_PCs = max(1, min(refCOV_top_PCs, N_EEG_electrodes - 1));
-        SSI_top_PCs = 4;
+        SSI_top_PCs = min(4, refCOV_top_PCs);
     end
     
     [Vs, Ds] = eig(refCOV_reg);
@@ -228,8 +227,8 @@ if ~isinf(smoothing_window_seconds)
     Template_guess = evecs_Template_cov(:, 1:min(size(evecs_Template_cov, 2), SSI_top_PCs));
     mean_thresh = mean(artifact_threshold_array);
     
-    % Dynamically scale chunk size to cap memory at ~1000 seconds per chunk
-    chunk_size = max(1, min(500, round(1000 / epoch_size)));
+    % Adapt chunk size to both epoch duration and channel-count-driven memory pressure.
+    chunk_size = local_chunk_size(N_EEG_electrodes, epoch_samples, epoch_size, eeg_data);
     num_chunks = ceil(N_epochs / chunk_size);
     for chunk = 1:num_chunks
         c_start = (chunk - 1) * chunk_size + 1;
@@ -242,16 +241,12 @@ if ~isinf(smoothing_window_seconds)
         
         EEGdata_epoched_chunk = reshape(eeg_data_chunk, N_EEG_electrodes, epoch_samples, c_len);
         
-        COV_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
-        for epo = 1:c_len
-            COV_chunk(:,:,epo) = cov(EEGdata_epoched_chunk(:,:,epo)');
-        end
-        
         Evec_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
         Eval_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
         for i = 1:c_len
-            COV_chunk(:,:,i) = (COV_chunk(:,:,i) + COV_chunk(:,:,i)') / 2;
-            [Evec_chunk(:,:,i), Eval_chunk(:,:,i)] = eig(COV_chunk(:,:,i), refCOV_reg, 'chol');
+            cov_epoch = cov(EEGdata_epoched_chunk(:,:,i)');
+            cov_epoch = (cov_epoch + cov_epoch') / 2;
+            [Evec_chunk(:,:,i), Eval_chunk(:,:,i)] = eig(cov_epoch, refCOV_reg, 'chol');
         end
         
         chunk_threshold = artifact_threshold_array(c_start:c_end);
@@ -261,7 +256,7 @@ if ~isinf(smoothing_window_seconds)
         artifacts_data_1(:, chunk_samples_start:chunk_samples_end) = artifacts_chunk;
         
         % Accumulate analytical SENSAI statistics locally
-        [cov_signal_chunk, cov_noise_chunk] = clean_SENSAI(mean_thresh, refCOV, Eval_chunk, Evec_chunk, COV_chunk, signal_type);
+        [cov_signal_chunk, cov_noise_chunk] = clean_SENSAI(mean_thresh, refCOV, Eval_chunk, Evec_chunk, [], signal_type);
         for i = 1:c_len
             global_epo_idx = c_start + i - 1;
             cov_signal = cov_signal_chunk(:,:,i);
@@ -279,7 +274,7 @@ if ~isinf(smoothing_window_seconds)
             NOISE_subspace_dist(global_epo_idx) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
         end
         
-        clear eeg_data_chunk EEGdata_epoched_chunk COV_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk cov_signal_chunk cov_noise_chunk;
+        clear eeg_data_chunk EEGdata_epoched_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk cov_signal_chunk cov_noise_chunk;
     end
     
     % Clean Shifted Stream 2 in Chunks
@@ -295,16 +290,12 @@ if ~isinf(smoothing_window_seconds)
         
         EEGdata_epoched_chunk = reshape(eeg_data_chunk, N_EEG_electrodes, epoch_samples, c_len);
         
-        COV_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
-        for epo = 1:c_len
-            COV_chunk(:,:,epo) = cov(EEGdata_epoched_chunk(:,:,epo)');
-        end
-        
         Evec_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
         Eval_chunk = zeros(N_EEG_electrodes, N_EEG_electrodes, c_len, 'like', eeg_data);
         for i = 1:c_len
-            COV_chunk(:,:,i) = (COV_chunk(:,:,i) + COV_chunk(:,:,i)') / 2;
-            [Evec_chunk(:,:,i), Eval_chunk(:,:,i)] = eig(COV_chunk(:,:,i), refCOV_reg, 'chol');
+            cov_epoch = cov(EEGdata_epoched_chunk(:,:,i)');
+            cov_epoch = (cov_epoch + cov_epoch') / 2;
+            [Evec_chunk(:,:,i), Eval_chunk(:,:,i)] = eig(cov_epoch, refCOV_reg, 'chol');
         end
         
         chunk_threshold = artifact_threshold_2(c_start:c_end);
@@ -313,23 +304,27 @@ if ~isinf(smoothing_window_seconds)
         cleaned_data_2(:, chunk_samples_start:chunk_samples_end) = cleaned_chunk;
         artifacts_data_2(:, chunk_samples_start:chunk_samples_end) = artifacts_chunk;
         
-        clear eeg_data_chunk EEGdata_epoched_chunk COV_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk;
+        clear eeg_data_chunk EEGdata_epoched_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk;
     end
     
     % Reconstruct overlapping segments
     size_reconstructed_2 = size(cleaned_data_2, 2);
-    sample_end = size_reconstructed_2 - shifting;
-    cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
-    cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
-    artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
-    artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    if size_reconstructed_2 > 0
+        sample_end = size_reconstructed_2 - shifting;
+        cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+        cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+        artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+        artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    end
     
     cleaned_data = cleaned_data_1;
     artifacts_data = artifacts_data_1;
     clear cleaned_data_1 artifacts_data_1;
     
-    cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
-    artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
+    if size_reconstructed_2 > 0
+        cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
+        artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
+    end
     clear cleaned_data_2 artifacts_data_2;
     
     cleaned_data = cleaned_data(:, 1:pnts_original);
@@ -424,8 +419,8 @@ else
     
     
     if strcmpi(signal_type, 'eeg')
-       refCOV_top_PCs = 3;
-       SSI_top_PCs = 3;
+         refCOV_top_PCs = min(3, N_EEG_electrodes);
+         SSI_top_PCs = refCOV_top_PCs;
     
         % disp(['EEG  refCOV PCs: ' num2str(refCOV_top_PCs)]);
         % disp(['EEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
@@ -442,7 +437,7 @@ else
             % fprintf('MEG  RefCOV PCs: %d (%.0f%% var)\n', refCOV_top_PCs, 100 * cumvar_refCOV(refCOV_top_PCs));
     
         % Top PCs for SSI (separate from refCOV top PCs)
-            SSI_top_PCs = 4;
+            SSI_top_PCs = min(4, refCOV_top_PCs);
         % disp(['MEG  SSI PCs: ' num2str(SSI_top_PCs) newline]);
     end
     
@@ -579,12 +574,14 @@ else
     % cosine_weights is already calculated
     
     size_reconstructed_2 = size(cleaned_data_2, 2);
-    sample_end = size_reconstructed_2 - shifting;
-    % Apply weights to the second (shifted) stream
-    cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
-    cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
-    artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
-    artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    if size_reconstructed_2 > 0
+        sample_end = size_reconstructed_2 - shifting;
+        % Apply weights to the second (shifted) stream
+        cleaned_data_2(:, 1:shifting) = cleaned_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+        cleaned_data_2(:, sample_end+1:end) = cleaned_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+        artifacts_data_2(:, 1:shifting) = artifacts_data_2(:, 1:shifting) .* cosine_weights(:, 1:shifting);
+        artifacts_data_2(:, sample_end+1:end) = artifacts_data_2(:, sample_end+1:end) .* cosine_weights(:, (shifting+1):end);
+    end
     
     % Combine streams (Optimize memory by clearing variables)
     cleaned_data = cleaned_data_1;
@@ -593,10 +590,14 @@ else
     artifacts_data = artifacts_data_1;
     clear artifacts_data_1; % Release memory
     
-    cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
+    if size_reconstructed_2 > 0
+        cleaned_data(:, shifting+1:shifting+size_reconstructed_2) = cleaned_data(:, shifting+1:shifting+size_reconstructed_2) + cleaned_data_2;
+    end
     clear cleaned_data_2; % Release memory
     
-    artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
+    if size_reconstructed_2 > 0
+        artifacts_data(:, shifting+1:shifting+size_reconstructed_2) = artifacts_data(:, shifting+1:shifting+size_reconstructed_2) + artifacts_data_2;
+    end
     clear artifacts_data_2; % Release memory
     
     % Remove padding to restore original data length
@@ -639,4 +640,41 @@ else
         ENOVA = 0;
     end
 end
+end
+
+function padding = local_reflect_pad(eeg_data, samples_to_pad)
+if samples_to_pad <= 0
+    padding = zeros(size(eeg_data, 1), 0, 'like', eeg_data);
+    return;
+end
+
+if size(eeg_data, 2) == 0
+    error('Cannot pad empty EEG data.');
+end
+
+padding = zeros(size(eeg_data, 1), samples_to_pad, 'like', eeg_data);
+filled = 0;
+while filled < samples_to_pad
+    reflected_chunk = fliplr(eeg_data);
+    chunk_len = min(size(reflected_chunk, 2), samples_to_pad - filled);
+    padding(:, filled + 1:filled + chunk_len) = reflected_chunk(:, 1:chunk_len);
+    filled = filled + chunk_len;
+end
+end
+
+function chunk_size = local_chunk_size(num_channels, epoch_samples, epoch_size, eeg_data)
+bytes_per_scalar = 8;
+if isa(eeg_data, 'single')
+    bytes_per_scalar = 4;
+end
+
+time_limited_chunk_size = max(1, min(500, round(1000 / epoch_size)));
+
+% Conservative peak-memory estimate per epoch for the sliding-window path:
+% Evec + Eval + epoched input chunk + cleaned/artifact outputs + covariance summaries.
+estimated_scalars_per_epoch = (2 * num_channels * num_channels) + (4 * num_channels * epoch_samples) + (2 * num_channels * num_channels);
+target_chunk_bytes = 256 * 1024 * 1024;
+memory_limited_chunk_size = max(1, floor(target_chunk_bytes / max(estimated_scalars_per_epoch * bytes_per_scalar, 1)));
+
+chunk_size = max(1, min(time_limited_chunk_size, memory_limited_chunk_size));
 end

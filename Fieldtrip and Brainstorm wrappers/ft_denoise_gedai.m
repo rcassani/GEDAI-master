@@ -29,6 +29,9 @@ function [data_clean, data_artifacts, SENSAI_score, SENSAI_score_per_band, artif
 %   cfg.visualize_artifacts      (logical) - Visualize artifacts. [Default: false]
 %   cfg.visualize_manifold       (logical) - Visualize SENSAI manifold. [Default: false]
 %   cfg.cat_trials               (logical) - Concatenate trials before denoising. [Default: true]
+%                                 Cleaned/artifact outputs are restored to the original
+%                                 trial boundaries after denoising. Scalar summary metrics
+%                                 remain aggregated across the concatenated run.
 %   cfg.signal_type              (char)    - 'eeg' or 'meg'. Auto-detected if not set.
 %
 % Outputs:
@@ -115,18 +118,24 @@ if strcmp(cfg.signal_type, 'meg')
 end
 
 % ---------- concatenate trials if requested ----------
+data_original = data;
 if cfg.cat_trials
     nTrials   = numel(data.trial);
     nChan     = numel(data.label);
-    lenTrials = numel(data.time{1});
-    total_pts = nTrials * lenTrials;
-    data_concat = zeros(nChan, total_pts);
-    time_concat = zeros(1, total_pts);
+    trial_lengths = cellfun(@(trial) size(trial, 2), data.trial);
+    total_pts = sum(trial_lengths);
+    data_concat = zeros(nChan, total_pts, 'like', data.trial{1});
+    sample_interval = 1 / data.fsample;
+    first_trial_time = data.time{1};
+    time_concat = first_trial_time(1) + (0:(total_pts - 1)) * sample_interval;
     idx_start = 1;
     for i = 1:nTrials
-        idx_end = idx_start + lenTrials - 1;
+        current_len = trial_lengths(i);
+        if size(data.trial{i}, 1) ~= nChan
+            error('All trials must contain the same number of channels when cfg.cat_trials is true.');
+        end
+        idx_end = idx_start + current_len - 1;
         data_concat(:, idx_start:idx_end) = data.trial{i};
-        time_concat(1, idx_start:idx_end) = data.time{i};
         idx_start = idx_end + 1;
     end
     data.trial = {data_concat};
@@ -134,27 +143,36 @@ if cfg.cat_trials
 end
 
 % ---------- process each trial ----------
-data_clean     = data;
-data_artifacts = data;
-SENSAI_score              = cell(numel(data.trial), 1);
-SENSAI_score_per_band     = cell(numel(data.trial), 1);
-artifact_threshold_per_band = cell(numel(data.trial), 1);
+if cfg.cat_trials
+    [clean_concat, ~, art_concat, Sscore, Sband, artThr, sample_mask] = ...
+        do_gedai(data, 1, cfg, process_mag_grad_separately, mag_idx, grad_idx);
+    [data_clean, data_artifacts] = split_concatenated_trials(data_original, clean_concat, art_concat, sample_mask);
+    SENSAI_score = Sscore;
+    SENSAI_score_per_band = Sband;
+    artifact_threshold_per_band = artThr;
+else
+    data_clean     = data;
+    data_artifacts = data;
+    SENSAI_score                = cell(numel(data.trial), 1);
+    SENSAI_score_per_band       = cell(numel(data.trial), 1);
+    artifact_threshold_per_band = cell(numel(data.trial), 1);
 
-nTr = numel(data.trial);
-for t = 1:nTr
-    [data_clean.trial{t}, data_clean.time{t}, EEGart, Sscore, Sband, artThr] = ...
-        do_gedai(data, t, cfg, process_mag_grad_separately, mag_idx, grad_idx);
-    data_artifacts.trial{t}       = EEGart;
-    SENSAI_score{t}               = Sscore;
-    SENSAI_score_per_band{t}      = Sband;
-    artifact_threshold_per_band{t} = artThr;
-end
+    nTr = numel(data.trial);
+    for t = 1:nTr
+        [data_clean.trial{t}, data_clean.time{t}, EEGart, Sscore, Sband, artThr] = ...
+            do_gedai(data, t, cfg, process_mag_grad_separately, mag_idx, grad_idx);
+        data_artifacts.trial{t}        = EEGart;
+        SENSAI_score{t}                = Sscore;
+        SENSAI_score_per_band{t}       = Sband;
+        artifact_threshold_per_band{t} = artThr;
+    end
 
-% Unwrap single-trial outputs to plain values for convenience
-if nTr == 1
-    SENSAI_score              = SENSAI_score{1};
-    SENSAI_score_per_band     = SENSAI_score_per_band{1};
-    artifact_threshold_per_band = artifact_threshold_per_band{1};
+    % Unwrap single-trial outputs to plain values for convenience
+    if nTr == 1
+        SENSAI_score                = SENSAI_score{1};
+        SENSAI_score_per_band       = SENSAI_score_per_band{1};
+        artifact_threshold_per_band = artifact_threshold_per_band{1};
+    end
 end
 
 
@@ -163,7 +181,7 @@ end
 % ==========================================================================
 
 % ---------- do_gedai: run GEDAI on one trial ----------
-function [dataClean, timeClean, artifactData, Sscore, Sband, Athr] = ...
+function [dataClean, timeClean, artifactData, Sscore, Sband, Athr, sampleMask] = ...
         do_gedai(data, t, cfg, process_mag_grad_separately, mag_idx, grad_idx)
 
     trial_data = data.trial{t};   % [nChan x nTime]
@@ -177,21 +195,25 @@ function [dataClean, timeClean, artifactData, Sscore, Sband, Athr] = ...
         [EEGclean_MAG,  EEGart_MAG,  Sscore_MAG,  Sband_MAG,  Athr_MAG]  = runGEDAI(EEGin_MAG,  cfg);
         [EEGclean_GRAD, EEGart_GRAD, Sscore_GRAD, Sband_GRAD, Athr_GRAD] = runGEDAI(EEGin_GRAD, cfg);
 
+        mask_MAG = get_samples_to_keep_mask(EEGclean_MAG, numel(trial_time));
+        mask_GRAD = get_samples_to_keep_mask(EEGclean_GRAD, numel(trial_time));
+        combined_mask = mask_MAG & mask_GRAD;
+        sampleMask = combined_mask;
+
+        [clean_MAG, art_MAG] = align_outputs_to_mask(EEGclean_MAG.data, EEGart_MAG.data, combined_mask, mask_MAG, 'MAG');
+        [clean_GRAD, art_GRAD] = align_outputs_to_mask(EEGclean_GRAD.data, EEGart_GRAD.data, combined_mask, mask_GRAD, 'GRAD');
+
         % --- Recombine into full channel matrix ---
         nChan = size(trial_data, 1);
-        nTime = size(trial_data, 2);
-        dataClean    = zeros(nChan, nTime);
-        artifactData = zeros(nChan, nTime);
+        nTimeOut = sum(combined_mask);
+        dataClean    = zeros(nChan, nTimeOut, 'like', trial_data);
+        artifactData = zeros(nChan, nTimeOut, 'like', trial_data);
+        dataClean(mag_idx, :)  = clean_MAG;
+        dataClean(grad_idx, :) = clean_GRAD;
+        artifactData(mag_idx, :)  = art_MAG;
+        artifactData(grad_idx, :) = art_GRAD;
 
-        % Trim each sensor type to original length (GEDAI may pad or trim)
-        nT_MAG  = min(size(EEGclean_MAG.data,  2), nTime);
-        nT_GRAD = min(size(EEGclean_GRAD.data, 2), nTime);
-        dataClean(mag_idx,  1:nT_MAG)  = EEGclean_MAG.data(:,  1:nT_MAG);
-        dataClean(grad_idx, 1:nT_GRAD) = EEGclean_GRAD.data(:, 1:nT_GRAD);
-        artifactData(mag_idx,  1:nT_MAG)  = EEGart_MAG.data(:,  1:nT_MAG);
-        artifactData(grad_idx, 1:nT_GRAD) = EEGart_GRAD.data(:, 1:nT_GRAD);
-
-        timeClean = trial_time;
+        timeClean = trial_time(combined_mask);
 
         % Merge per-band outputs
         Sscore = struct('MAG', Sscore_MAG, 'GRAD', Sscore_GRAD);
@@ -200,21 +222,44 @@ function [dataClean, timeClean, artifactData, Sscore, Sband, Athr] = ...
 
     else
         % --- Single pass (EEG or homogeneous MEG) ---
-        nTime = size(trial_data, 2);
         EEGin = buildEEGin(trial_data, trial_time, data.label, cfg, data);
         [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg);
 
-        % EEGclean.data may be longer (padded) or shorter (epochs rejected)
-        % than the original. Always trim/pad to the original length.
-        nOut = size(EEGclean.data, 2);
-        if nOut >= nTime
-            dataClean    = EEGclean.data(:, 1:nTime);
-            artifactData = EEGart.data(:,   1:nTime);
+        mask = get_samples_to_keep_mask(EEGclean, numel(trial_time));
+        sampleMask = mask;
+        [dataClean, artifactData] = align_outputs_to_mask(EEGclean.data, EEGart.data, mask, mask, 'single-sensor');
+        timeClean = trial_time(mask);
+    end
+end
+
+function [data_clean_out, data_artifacts_out] = split_concatenated_trials(data_template, clean_concat, art_concat, sample_mask)
+    data_clean_out = data_template;
+    data_artifacts_out = data_template;
+
+    sample_offset = 1;
+    kept_offset = 1;
+    total_kept = sum(sample_mask);
+    for trial_idx = 1:numel(data_template.trial)
+        current_len = size(data_template.trial{trial_idx}, 2);
+        current_mask = sample_mask(sample_offset:sample_offset + current_len - 1);
+        kept_len = sum(current_mask);
+
+        if kept_len > 0
+            kept_range = kept_offset:kept_offset + kept_len - 1;
+            data_clean_out.trial{trial_idx} = clean_concat(:, kept_range);
+            data_artifacts_out.trial{trial_idx} = art_concat(:, kept_range);
+            kept_offset = kept_offset + kept_len;
         else
-            dataClean    = [EEGclean.data, zeros(size(EEGclean.data,1), nTime-nOut)];
-            artifactData = [EEGart.data,   zeros(size(EEGart.data,1),   nTime-nOut)];
+            data_clean_out.trial{trial_idx} = clean_concat(:, []);
+            data_artifacts_out.trial{trial_idx} = art_concat(:, []);
         end
-        timeClean = trial_time;
+        data_clean_out.time{trial_idx} = data_template.time{trial_idx}(current_mask);
+        data_artifacts_out.time{trial_idx} = data_template.time{trial_idx}(current_mask);
+        sample_offset = sample_offset + current_len;
+    end
+
+    if kept_offset - 1 ~= total_kept || size(clean_concat, 2) ~= total_kept || size(art_concat, 2) ~= total_kept
+        error('ft_denoise_gedai:SplitMismatch', 'Concatenated outputs could not be split back to the original trial boundaries.');
     end
 end
 
@@ -232,11 +277,36 @@ function [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg)
         cfg.signal_type);
 end
 
+function mask = get_samples_to_keep_mask(EEG, target_length)
+    mask = true(1, target_length);
+    if isfield(EEG, 'etc') && isfield(EEG.etc, 'GEDAI') && isfield(EEG.etc.GEDAI, 'samples_to_keep')
+        candidate_mask = logical(EEG.etc.GEDAI.samples_to_keep(:)');
+        if length(candidate_mask) == target_length
+            mask = candidate_mask;
+        end
+    end
+end
+
+function [clean_data, artifact_data] = align_outputs_to_mask(clean_data_in, artifact_data_in, target_mask, source_mask, sensor_label)
+    if length(target_mask) ~= length(source_mask)
+        error('ft_denoise_gedai:%sMaskMismatch', sensor_label, 'Target and source masks must have the same length.');
+    end
+
+    expected_columns = sum(source_mask);
+    if size(clean_data_in, 2) ~= expected_columns || size(artifact_data_in, 2) ~= expected_columns
+        error('ft_denoise_gedai:%sOutputMismatch', sensor_label, 'GEDAI output length does not match its keep-mask for %s data.', sensor_label);
+    end
+
+    selection_mask = target_mask(source_mask);
+    clean_data = clean_data_in(:, selection_mask);
+    artifact_data = artifact_data_in(:, selection_mask);
+end
+
 % ---------- buildEEGin: construct EEGLAB-style struct from FieldTrip data ----------
 function EEGin = buildEEGin(trial_data, trial_time, labels, cfg, data)
     EEGin          = struct();
     EEGin.data     = trial_data;
-    EEGin.srate    = 1 / mean(diff(trial_time));
+    EEGin.srate    = data.fsample;
     EEGin.nbchan   = size(trial_data, 1);
     EEGin.pnts     = size(trial_data, 2);
     EEGin.times    = trial_time * 1000;  % s -> ms (EEGLAB convention)
