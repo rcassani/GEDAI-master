@@ -95,7 +95,7 @@
 % 
 %   com                     - output logging to EEG.history
 
-% [Generalized Eigenvalue De-Artifacting Intrument (GEDAI) v 1.6]
+% [Generalized Eigenvalue De-Artifacting Intrument (GEDAI) v 1.7]
 % PolyForm Noncommercial License 1.0.0
 % https://polyformproject.org/licenses/noncommercial/1.0.0
 %
