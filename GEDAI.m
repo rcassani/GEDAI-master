@@ -448,22 +448,6 @@ if EEGin.trials > 1 && ndims(EEGin.data) == 3
     EEGin = eeg_epoch2continuous(EEGin);
 end
 
-% -- Ensure epoch size results in an even number of samples (for broadband)
- broadband_epoch_size = 2; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
-if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
-    ideal_total_samples_double = broadband_epoch_size * EEGin.srate;
-    nearest_integer_samples = round(ideal_total_samples_double);
-    if rem(nearest_integer_samples, 2) ~= 0
-        if abs(ideal_total_samples_double - (nearest_integer_samples - 1)) < abs(ideal_total_samples_double - (nearest_integer_samples + 1))
-            target_total_samples_int = nearest_integer_samples - 1;
-        else
-            target_total_samples_int = nearest_integer_samples + 1;
-        end
-    else
-        target_total_samples_int = nearest_integer_samples;
-    end
-    broadband_epoch_size = target_total_samples_int / EEGin.srate;
-end
 
 %% Ensure double input (initially)
 EEGin.data=double(EEGin.data);
@@ -687,19 +671,39 @@ if ~isempty(bands_to_zero)
     end
 end
 
-    % ------------------ GEDAI ------------------------------
+    %% ------------------ GEDAI Broadband------------------------------
+
+
+% -- Ensure epoch size results in an even number of samples (for broadband)
+ broadband_epoch_size = 1; % Note: IN SECONDS (this is now only the DEFAULT for broadband)
+if rem(broadband_epoch_size*EEGin.srate, 2) ~= 0
+    ideal_total_samples_double = broadband_epoch_size * EEGin.srate;
+    nearest_integer_samples = round(ideal_total_samples_double);
+    if rem(nearest_integer_samples, 2) ~= 0
+        if abs(ideal_total_samples_double - (nearest_integer_samples - 1)) < abs(ideal_total_samples_double - (nearest_integer_samples + 1))
+            target_total_samples_int = nearest_integer_samples - 1;
+        else
+            target_total_samples_int = nearest_integer_samples + 1;
+        end
+    else
+        target_total_samples_int = nearest_integer_samples;
+    end
+    broadband_epoch_size = target_total_samples_int / EEGin.srate;
+end
 
     disp([newline 'SENSAI threshold detection...please wait']);
     broadband_optimization_type = 'parabolic';
-    broadband_artifact_threshold_type = 'auto-';
-    broadband_minThreshold = -2;
+    broadband_artifact_threshold_type = 'auto';
+    broadband_minThreshold = -4;
     broadband_maxThreshold = 12;
     [cleaned_broadband_data, ~, broadband_sensai, broadband_thresh, broadband_ENOVA] = GEDAI_per_band(double(EEGavRef.data), EEGavRef.srate, EEGavRef.chanlocs, broadband_artifact_threshold_type, broadband_epoch_size, refCOV, broadband_optimization_type, parallel, signal_type, broadband_minThreshold, broadband_maxThreshold, smoothing_window_seconds);
 
 
 
 
-%% Second pass: Wavelet decomposition and per-band denoising
+%% ------------------ GEDAI Spectral------------------------------
+    
+% Second pass: Wavelet decomposition and per-band denoising
 % MEMORY OPTIMIZED: Use incremental band processing instead of full decomposition
 unfiltered_data = cleaned_broadband_data';
 wavelet_type = 'haar';

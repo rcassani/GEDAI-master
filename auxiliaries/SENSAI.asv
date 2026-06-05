@@ -62,22 +62,21 @@ for epoch = 1:num_epochs
     SIGNAL_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
 
     % % NOISE SUBSPACE similarity via 2-step Fast Subspace Iteration
-    cov_noise = cov_noise_epoched(:,:,epoch);
-    
+    % cov_noise = cov_noise_epoched(:,:,epoch);
     % % Define a tolerance (e.g., 1e-12 or using eps)
-    tol = 1e-12; 
+    % tol = 1e-12; 
     % Check if the maximum absolute value is below the tolerance
-    if max(abs(cov_noise(:))) < tol
-        % Use the size of Template_guess to construct the identity-like matrix
-        Y1_noise = eye(size(Template_guess)); 
-    else
-        Y1_noise = cov_noise * Template_guess;
-    end
-
+    % if max(abs(cov_noise(:))) < tol
+    % disp('The covariance matrix is effectively zero');
+    % NOISE_subspace_similarity_distribution(epoch) = 0;
+    
+    % else
+    Y1_noise = cov_noise * Template_guess;
     [Q1_noise, ~] = qr(Y1_noise, 0);
     Y2_noise = cov_noise * Q1_noise;
     [evecs_noise, ~] = qr(Y2_noise, 0);
     NOISE_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
+    end
 end
 
 %% Compute SENSAI Score
