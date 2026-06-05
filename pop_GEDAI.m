@@ -20,8 +20,8 @@ function [EEG, com] = pop_GEDAI(EEG, varargin)
 artifact_threshold = 'auto';
 epoch_size_in_cycles = 12;
 lowcut_frequency = 0.5;
-ENOVA_threshold_per_epoch = 0.9;
-ENOVA_threshold_per_channel = 0.9;
+ENOVA_threshold_per_epoch = 0.95;
+ENOVA_threshold_per_channel = 0.95;
 smoothing_window_seconds_default = Inf;
 
 % Build popup menu entries for output reference selection.
