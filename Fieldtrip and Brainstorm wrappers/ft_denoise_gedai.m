@@ -68,6 +68,7 @@ def.enova_threshold_per_epoch = [];
 def.enova_threshold_per_channel = [];
 def.cat_trials              = true;
 def.signal_type             = '';       % empty = auto-detect
+def.smoothing_window_seconds = Inf;
 
 cfg = applyDefaults(cfg, def);
 
@@ -274,7 +275,8 @@ function [EEGclean, EEGart, Sscore, Sband, Athr] = runGEDAI(EEGin, cfg)
         cfg.visualize_artifacts || cfg.visualize_manifold, ...
         cfg.enova_threshold_per_epoch, ...
         cfg.enova_threshold_per_channel, ...
-        cfg.signal_type);
+        cfg.signal_type, ...
+        cfg.smoothing_window_seconds);
 end
 
 function mask = get_samples_to_keep_mask(EEG, target_length)

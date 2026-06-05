@@ -24,7 +24,7 @@ refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
 
 %% Estimate Signal Quality
 num_chans = size(refCOV, 1);
-epoch_samples = srate * epoch_size;
+epoch_samples = round(srate * epoch_size);
 
 % Determine the number of top PCs to use based on signal type
 if strcmpi(signal_type, 'meg')

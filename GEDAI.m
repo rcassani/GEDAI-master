@@ -469,7 +469,9 @@ if strcmp(signal_type, 'eeg')
     else
         EEGavRef = GEDAI_nonRankDeficientAveRef(EEGin); % non rank-deficient average referencing
     end 
-    
+else
+    % For MEG or other signal types where average referencing is not performed
+    EEGavRef = EEGin;
 end
 
 
