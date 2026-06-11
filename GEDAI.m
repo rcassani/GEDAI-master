@@ -378,6 +378,30 @@ if ENOVA_threshold_per_channel < inf
         
         % --- FINAL VISUALIZATIONS ON FULL INTERPOLATED DATA ---
         if visualize_artifacts
+            % Compute EEGavRef for visualization
+            if strcmp(signal_type, 'eeg')
+                is_standard_avg_ref = max(abs(mean(EEGin.data, 1))) < 1e-5;
+                if is_standard_avg_ref 
+                    EEGavRef_for_vis = EEGin;
+                elseif max(abs(sum(EEGin.data, 1) / (size(EEGin.data, 1) + 1))) < 1e-5
+                    EEGavRef_for_vis = EEGin;
+                else
+                    EEGavRef_for_vis = GEDAI_nonRankDeficientAveRef(EEGin);
+                end 
+            else
+                EEGavRef_for_vis = EEGin;
+            end
+            
+            % Create refCOV for full channel space
+            refCOV_full = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef_for_vis, signal_type);
+            
+            if ~isempty(refCOV_full)
+                if strcmpi(signal_type, 'meg'), vis_pcs = 4; else, vis_pcs = 3; end
+                sensai_epoch_size = 1;
+                visualization_metrics = SENSAI_visualization(EEGavRef_for_vis, EEGclean, EEGartifacts, refCOV_full, sensai_epoch_size, signal_type, vis_pcs, artifact_threshold_type, smoothing_window_seconds, SENSAI_score, mean_ENOVA, epoch_size_in_cycles, lowcut_frequency);
+                EEGclean.etc.GEDAI.visualization_metrics = visualization_metrics;
+            end
+
             EEGclean_for_vis = EEGclean;
             EEGin_for_vis = EEGin;
             if ~isempty(output_reference_channel)
@@ -485,128 +509,7 @@ end
 
 
 %% Create Reference Covariance Matrix (refCOV)
-
-if ~ischar(ref_matrix_type)
-    refCOV = ref_matrix_type; % Use custom covariance matrix
-    disp([newline 'Using custom covariance matrix']);
-
- 
-else
-    switch ref_matrix_type
-        case 'precomputed'
-        disp([newline 'GEDAI Leadfield model: BEM precomputed for EEG'])
-            L=load('fsavLEADFIELD_4_GEDAI.mat');
-            electrodes_labels = {EEGin.chanlocs.labels};
-            template_electrode_labels = {L.leadfield4GEDAI.electrodes.Name};
-            
-            % Extract matching substrings from EEG labels
-            chanidx = zeros(1, length(electrodes_labels));
-            for i = 1:length(electrodes_labels)
-                eeg_label = electrodes_labels{i};
-                % Try direct match first
-                [found, idx] = ismember(lower(eeg_label), lower(template_electrode_labels));
-                if found
-                    chanidx(i) = idx;
-                else
-                    % Search for template labels within the EEG label
-                    for j = 1:length(template_electrode_labels)
-                        template_label = template_electrode_labels{j};
-                        % Case-insensitive substring search
-                        if contains(lower(eeg_label), lower(template_label))
-                            chanidx(i) = j;
-                            break;
-                        end
-                    end
-                end
-            end
-            
-            if any(chanidx == 0)
-                missing_labels = strjoin(electrodes_labels(chanidx == 0), ', ');
-                error(['Electrode labels not found: ' missing_labels '. Either remove them using ''Edit ->Select data'' or select the ''interpolated'' leadfield matrix for non-standard locations.']);
-            end
-            refCOV = L.leadfield4GEDAI.gram_matrix_avref(chanidx,chanidx);
-
-        case 'interpolated'
-    % 1. Verification of Spatial Locations
-    % We check if the number of populated X and sph_theta coordinates 
-    % matches the actual number of channels.
-    num_chans = length(EEGavRef.chanlocs);
-    has_cartesian = length([EEGavRef.chanlocs.X]) == num_chans;
-    has_spherical = length([EEGavRef.chanlocs.theta]) == num_chans;
-    
-    if has_cartesian & has_spherical
-        % 2. Leadfield Processing
-        disp([newline 'GEDAI Leadfield model: BEM warped for EEG'])
-        L = load('fsavLEADFIELD_4_GEDAI.mat');
-        
-        % The leadfield data needs to be average referenced before interpolation
-        leadfield_EEG = L.leadfield4GEDAI.EEG;
-        
-        % Average reference the Gain matrix (channels x sources)
-        % Using non-rank-deficient average reference (to match EEG data processing)
-        leadfield_EEG.data = L.leadfield4GEDAI.Gain - sum(L.leadfield4GEDAI.Gain, 1) / (size(L.leadfield4GEDAI.Gain, 1) + 1); 
-
-        
-        % 3. Interpolation and Covariance
-        interpolated_EEG = interp_mont_GEDAI(leadfield_EEG, EEGavRef.chanlocs);
-        refCOV = interpolated_EEG.data * interpolated_EEG.data';
-        
-     else
-         error(['CRITICAL: Channel locations are incomplete. ' ...
-               'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
-    
-    end
-
-
-        case 'warped'
-    % 1. Verification of Spatial Locations
-    % We check if the number of populated X and sph_theta coordinates 
-    % matches the actual number of channels.
-    num_chans = length(EEGavRef.chanlocs);
-    has_cartesian = length([EEGavRef.chanlocs.X]) == num_chans;
-    has_spherical = length([EEGavRef.chanlocs.theta]) == num_chans;
-
-
-   if has_cartesian & has_spherical
-        % 2. Leadfield Processing
-        disp([newline 'GEDAI Leadfield model: BEM Surface source model'])
-
-    %  Boundary Element Method (BEM) head model based on EEGLAB/Fieldtrip source model, see https://eeglab.org/tutorials/09_source/Model_Settings.html
-    try
-        template_locs = readlocs('standard_1005.elc');
-        common_labels = intersect(lower({EEGin.chanlocs.labels}), lower({template_locs.labels}));
-    catch
-        common_labels = [];
-    end
-
-    if ~isempty(common_labels)
-        [~, chanlocs_transform] = coregister(EEGin.chanlocs, 'standard_1005.elc','warp', 'auto', 'manual', 'off');
-    else
-        disp('Warning: no common channel labels found with standard_1005.elc. Warping bypassed; using default scaling/alignment instead.');
-        [~, chanlocs_transform] = coregister(EEGin.chanlocs, 'standard_1005.elc', 'manual', 'off');
-    end
-    EEGin = pop_dipfit_settings(EEGin, 'hdmfile','standard_vol.mat','mrifile','standard_mri.mat','chanfile','standard_1005.elc','coordformat','MNI','coord_transform',chanlocs_transform);
-    EEGin = pop_leadfield(EEGin, 'sourcemodel','head_modelColin27_5003_Standard-10-5-Cap339.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); % Surface Colin27
-    %EEGin = pop_leadfield(EEGin, 'sourcemodel','tess_cortex_mid_low_2000V.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); %  Surface ICBM152
-    %EEGin = pop_leadfield(EEGin, 'sourcemodel','LORETA-Talairach-BAs.mat','sourcemodel2mni',[],'downsample',1); % Volumetric ICBM152
-    
-    DIPFIT_leadfield=cell2mat(EEGin.dipfit.sourcemodel.leadfield); %Gain matrix
-
-    % Average reference the Gain matrix (channels x sources) using non-rank-deficient average reference 
-    DIPFIT_leadfield = DIPFIT_leadfield- sum(DIPFIT_leadfield, 1) / (size(DIPFIT_leadfield, 1) + 1); 
-
-    refCOV=DIPFIT_leadfield*DIPFIT_leadfield'; % gram matrix
-
-   else
-         error(['CRITICAL: Channel locations are incomplete. ' ...
-               'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
-   end
-    end
-end
-
-% Ensure refCOV is real and perfectly symmetric to prevent eig/eigs errors
-refCOV = real(refCOV);
-refCOV = (refCOV + refCOV') / 2;
+refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_type);
 
 % --- Wavelet-based High-Pass Filtering ---
 % Calculate required level to resolve lowcut_frequency
@@ -1414,4 +1317,116 @@ EEG.ref = applied_reference_label;
 for chIdx = 1:EEG.nbchan
     EEG.chanlocs(chIdx).ref = applied_reference_label;
 end
+end
+
+function refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_type)
+    if ~ischar(ref_matrix_type)
+        refCOV = ref_matrix_type; % Use custom covariance matrix
+        disp([newline 'Using custom covariance matrix']);
+    else
+        switch ref_matrix_type
+            case 'precomputed'
+                disp([newline 'GEDAI Leadfield model: BEM precomputed for EEG'])
+                L = load('fsavLEADFIELD_4_GEDAI.mat');
+                electrodes_labels = {EEGin.chanlocs.labels};
+                template_electrode_labels = {L.leadfield4GEDAI.electrodes.Name};
+                
+                % Extract matching substrings from EEG labels
+                chanidx = zeros(1, length(electrodes_labels));
+                for i = 1:length(electrodes_labels)
+                    eeg_label = electrodes_labels{i};
+                    % Try direct match first
+                    [found, idx] = ismember(lower(eeg_label), lower(template_electrode_labels));
+                    if found
+                        chanidx(i) = idx;
+                    else
+                        % Search for template labels within the EEG label
+                        for j = 1:length(template_electrode_labels)
+                            template_label = template_electrode_labels{j};
+                            % Case-insensitive substring search
+                            if contains(lower(eeg_label), lower(template_label))
+                                chanidx(i) = j;
+                                break;
+                            end
+                        end
+                    end
+                end
+                
+                if any(chanidx == 0)
+                    missing_labels = strjoin(electrodes_labels(chanidx == 0), ', ');
+                    error(['Electrode labels not found: ' missing_labels '. Either remove them using ''Edit ->Select data'' or select the ''interpolated'' leadfield matrix for non-standard locations.']);
+                end
+                refCOV = L.leadfield4GEDAI.gram_matrix_avref(chanidx,chanidx);
+
+            case 'interpolated'
+                % 1. Verification of Spatial Locations
+                num_chans = length(EEGavRef.chanlocs);
+                has_cartesian = length([EEGavRef.chanlocs.X]) == num_chans;
+                has_spherical = length([EEGavRef.chanlocs.theta]) == num_chans;
+                
+                if has_cartesian && has_spherical
+                    % 2. Leadfield Processing
+                    disp([newline 'GEDAI Leadfield model: BEM warped for EEG'])
+                    L = load('fsavLEADFIELD_4_GEDAI.mat');
+                    
+                    % The leadfield data needs to be average referenced before interpolation
+                    leadfield_EEG = L.leadfield4GEDAI.EEG;
+                    
+                    % Average reference the Gain matrix (channels x sources)
+                    % Using non-rank-deficient average reference (to match EEG data processing)
+                    leadfield_EEG.data = L.leadfield4GEDAI.Gain - sum(L.leadfield4GEDAI.Gain, 1) / (size(L.leadfield4GEDAI.Gain, 1) + 1); 
+
+                    % 3. Interpolation and Covariance
+                    interpolated_EEG = interp_mont_GEDAI(leadfield_EEG, EEGavRef.chanlocs);
+                    refCOV = interpolated_EEG.data * interpolated_EEG.data';
+                    
+                else
+                    error(['CRITICAL: Channel locations are incomplete. ' ...
+                           'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
+                end
+
+            case 'warped'
+                % 1. Verification of Spatial Locations
+                num_chans = length(EEGavRef.chanlocs);
+                has_cartesian = length([EEGavRef.chanlocs.X]) == num_chans;
+                has_spherical = length([EEGavRef.chanlocs.theta]) == num_chans;
+
+                if has_cartesian && has_spherical
+                    % 2. Leadfield Processing
+                    disp([newline 'GEDAI Leadfield model: BEM Surface source model'])
+
+                    %  Boundary Element Method (BEM) head model based on EEGLAB/Fieldtrip source model, see https://eeglab.org/tutorials/09_source/Model_Settings.html
+                    try
+                        template_locs = readlocs('standard_1005.elc');
+                        common_labels = intersect(lower({EEGin.chanlocs.labels}), lower({template_locs.labels}));
+                    catch
+                        common_labels = [];
+                    end
+
+                    if ~isempty(common_labels)
+                        [~, chanlocs_transform] = coregister(EEGin.chanlocs, 'standard_1005.elc','warp', 'auto', 'manual', 'off');
+                    else
+                        disp('Warning: no common channel labels found with standard_1005.elc. Warping bypassed; using default scaling/alignment instead.');
+                        [~, chanlocs_transform] = coregister(EEGin.chanlocs, 'standard_1005.elc', 'manual', 'off');
+                    end
+                    EEGin = pop_dipfit_settings(EEGin, 'hdmfile','standard_vol.mat','mrifile','standard_mri.mat','chanfile','standard_1005.elc','coordformat','MNI','coord_transform',chanlocs_transform);
+                    EEGin = pop_leadfield(EEGin, 'sourcemodel','head_modelColin27_5003_Standard-10-5-Cap339.mat','sourcemodel2mni',[0 -24 -45 0 0 -1.5708 1000 1000 1000] ,'downsample',1); % Surface Colin27
+                    
+                    DIPFIT_leadfield=cell2mat(EEGin.dipfit.sourcemodel.leadfield); %Gain matrix
+
+                    % Average reference the Gain matrix (channels x sources) using non-rank-deficient average reference 
+                    DIPFIT_leadfield = DIPFIT_leadfield- sum(DIPFIT_leadfield, 1) / (size(DIPFIT_leadfield, 1) + 1); 
+
+                    refCOV=DIPFIT_leadfield*DIPFIT_leadfield'; % gram matrix
+
+                else
+                     error(['CRITICAL: Channel locations are incomplete. ' ...
+                           'Ensure all %d channels have X, Y, Z and spherical coordinates.'], num_chans);
+                end
+        end
+    end
+
+    % Ensure refCOV is real and perfectly symmetric to prevent eig/eigs errors
+    refCOV = real(refCOV);
+    refCOV = (refCOV + refCOV') / 2;
 end
