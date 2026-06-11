@@ -432,7 +432,16 @@ end
 % =========================================================================
 
 % Display signal type being processed
-channel_type=EEGin.chanlocs(1).type;
+if ~isempty(EEGin.chanlocs)
+    if ~isfield(EEGin.chanlocs, 'type') || isempty(EEGin.chanlocs(1).type) || (ischar(EEGin.chanlocs(1).type) && isempty(strtrim(EEGin.chanlocs(1).type)))
+        for idx = 1:length(EEGin.chanlocs)
+            EEGin.chanlocs(idx).type = 'eeg';
+        end
+    end
+    channel_type = EEGin.chanlocs(1).type;
+else
+    channel_type = 'eeg';
+end
 if strcmp(signal_type, 'eeg')
     disp([newline 'GEDAI denoising of ' channel_type ' : '  num2str(size(EEGin.data,1)) ' channels']);
 elseif strcmp(signal_type, 'meg')
