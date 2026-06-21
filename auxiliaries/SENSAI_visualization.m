@@ -29,7 +29,7 @@ end
 srate = EEGavRef.srate;
 epoch_samples = round(srate * epoch_duration_sec);
 
-function COV_array = compute_cov_array(data)
+function COV_array = compute_cov_3d(data, epoch_samples)
     pnts = size(data, 2);
     remainder = rem(pnts, epoch_samples);
     if remainder ~= 0
@@ -38,24 +38,34 @@ function COV_array = compute_cov_array(data)
         data = [data, padding];
     end
     num_epochs = size(data, 2) / epoch_samples;
-    COV_array = cell(num_epochs, 1);
-    for epo = 1:num_epochs
-        i_start = (epo - 1) * epoch_samples + 1;
-        i_end   = i_start + epoch_samples - 1;
-        COV_array{epo} = cov(data(:, i_start:i_end)');
+    n_chans = size(data, 1);
+    try
+        % Fast page-wise multiplication (introduced in R2020b)
+        data_3d = reshape(data, n_chans, epoch_samples, num_epochs);
+        data_3d = data_3d - mean(data_3d, 2);
+        COV_array = pagemtimes(data_3d, 'none', data_3d, 'transpose') / (epoch_samples - 1);
+    catch
+        % Fallback for MATLAB versions prior to R2020b
+        COV_array = zeros(n_chans, n_chans, num_epochs);
+        for epo = 1:num_epochs
+            i_start = (epo - 1) * epoch_samples + 1;
+            i_end   = i_start + epoch_samples - 1;
+            COV_array(:, :, epo) = cov(data(:, i_start:i_end)');
+        end
     end
 end
 
-C_before    = compute_cov_array(EEGavRef.data);
-C_after     = compute_cov_array(EEGclean.data);
-C_artifacts = compute_cov_array(EEGartifacts.data);
+C_before    = compute_cov_3d(EEGavRef.data, epoch_samples);
+C_after     = compute_cov_3d(EEGclean.data, epoch_samples);
+C_artifacts = compute_cov_3d(EEGartifacts.data, epoch_samples);
 
-num_epochs_after = length(C_after);
-if length(C_before) > num_epochs_after
-    C_before = C_before(1:num_epochs_after);
-elseif length(C_before) < num_epochs_after
-    C_after = C_after(1:length(C_before));
-    C_artifacts = C_artifacts(1:length(C_before));
+num_epochs_after = size(C_after, 3);
+num_epochs_before = size(C_before, 3);
+if num_epochs_before > num_epochs_after
+    C_before = C_before(:, :, 1:num_epochs_after);
+elseif num_epochs_before < num_epochs_after
+    C_after = C_after(:, :, 1:num_epochs_before);
+    C_artifacts = C_artifacts(:, :, 1:num_epochs_before);
 end
 
 %% ── 2. Subspace Analysis ───────────────────────────────────────────────
@@ -180,8 +190,14 @@ text(ax1, mean(x_lims), 1.10, 'Leadfield Subspace', 'FontSize', 10, 'Color', 0.5
 if ~isempty(lda_full)
     xl = ax2.XLim; yl = ax2.YLim;
     [Xg, Yg] = meshgrid(linspace(xl(1), xl(2), 200), linspace(yl(1), yl(2), 200));
-    [~, Probs] = predict(lda_full, [Yg(:), Xg(:)]);
-    Pg = reshape(Probs(:,2), size(Xg)); 
+    try
+        coeff = lda_full.Coeffs(1, 2);
+        scores = [Yg(:), Xg(:)] * coeff.Linear + coeff.Const;
+        Pg = reshape(1 ./ (1 + exp(scores)), size(Xg));
+    catch
+        [~, Probs] = predict(lda_full, [Yg(:), Xg(:)]);
+        Pg = reshape(Probs(:,2), size(Xg));
+    end 
     h_cont = imagesc(ax2, xl, yl, Pg);
     set(ax2, 'YDir', 'normal'); 
     n = 64;
@@ -195,7 +211,14 @@ xlabel(ax2, 'Epoch Power (dB)', 'FontSize', 11);
 legend(ax2, [h_star, h_sig, h_noise], {'Leadfield Subspace', sprintf('Signal (mean SSI=%.2f)', mean(ssi_after)), sprintf('Noise (mean SSI=%.2f)', mean(ssi_artifacts))}, ...
        'Location', 'northeastoutside', 'FontSize', 10);
 
-sgtitle(plot_title, 'FontSize', 13, 'FontWeight', 'bold');
+try
+    sgtitle(plot_title, 'FontSize', 13, 'FontWeight', 'bold');
+catch
+    try
+        suptitle(plot_title);
+    catch
+    end
+end
 
 % ── 6. Add Marginal Density Distributions ─────────────────────────────────
 % Panel 1 Marginals (Empty data, just for layout/title alignment)
@@ -226,18 +249,34 @@ drawnow;
 end
 
 %% Helper Functions
-function angs = extract_angles(C_array, basis_ref, top_PCs)
-    n = length(C_array); angs = zeros(n, top_PCs);
-    for i = 1:n
-        [V, D] = eig(C_array{i}); [~, idx] = sort(diag(D), 'descend');
-        basis_c = V(:, idx(1:top_PCs));
-        angs(i,:) = subspace_angles(basis_c, basis_ref)';
+function angs = extract_angles(C, basis_ref, top_PCs)
+    n = size(C, 3);
+    angs = zeros(n, top_PCs);
+    try
+        % Faster 'vector' option (introduced in R2016b)
+        for i = 1:n
+            [V, d] = eig(C(:, :, i), 'vector');
+            [~, idx] = sort(d, 'descend');
+            basis_c = V(:, idx(1:top_PCs));
+            angs(i, :) = svd(double(basis_c)' * double(basis_ref))';
+        end
+    catch
+        % Fallback for MATLAB versions prior to R2016b
+        for i = 1:n
+            [V, D] = eig(C(:, :, i));
+            [~, idx] = sort(diag(D), 'descend');
+            basis_c = V(:, idx(1:top_PCs));
+            angs(i, :) = svd(double(basis_c)' * double(basis_ref))';
+        end
     end
 end
 
-function pow = extract_power(C_array)
-    n = length(C_array); pow = zeros(n, 1);
-    for i = 1:n, pow(i) = trace(C_array{i}); end
+function pow = extract_power(C)
+    n_chans = size(C, 1);
+    n_epochs = size(C, 3);
+    C_reshaped = reshape(C, [], n_epochs);
+    diag_indices = 1 : (n_chans + 1) : (n_chans^2);
+    pow = sum(C_reshaped(diag_indices, :), 1)';
 end
 
 function draw_ellipse(ax, x, y, col, conf)
