@@ -160,6 +160,25 @@ lastPos = 0;
 %hFig = figure('ResizeFcn',@on_window_resized,'KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); hold; axis();
 hFig = figure('KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); hold on; axis();
 hAxis = gca;
+
+% Set axis limits and ticks/labels once during initialization
+xlim(hAxis, [0 1]);
+ylim(hAxis, [0 1]);
+ylr = [opts.yrange(1) opts.yrange(2)];
+channel_y = (ylr(2):(ylr(1)-ylr(2))/(size(new.data,1)-1):ylr(1))';
+if isfield(old.chanlocs,'labels')
+    set(hAxis,'ytick',channel_y(end:-1:1));
+    labels = {old.chanlocs.labels};
+    set(hAxis,'yticklabel',labels(end:-1:1));
+end
+
+% Pre-create line objects to update in-place for fast rendering
+h_old_line = plot(hAxis, NaN, NaN, 'Color', opts.oldcol, 'LineWidth', opts.line_width(1), 'LineStyle', opts.line_spec);
+h_new_line = plot(hAxis, NaN, NaN, 'Color', opts.newcol, 'LineWidth', opts.line_width(end), 'LineStyle', opts.line_spec);
+h_bad_line = plot(hAxis, NaN, NaN, 'Color', [1 0 1], 'LineWidth', opts.line_width(end), 'LineStyle', opts.line_spec);
+h_diff_line = plot(hAxis, NaN, NaN, 'Color', opts.newcol, 'LineWidth', opts.line_width(1), 'LineStyle', opts.line_spec);
+h_event_lines = [];
+
 hSlider = uicontrol('style','slider','KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); on_resize();
 set(hSlider, 'callback', @on_update);
 addlistener(hSlider, 'ContinuousValueChange', @(~,~) on_update());
@@ -184,25 +203,13 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         if relPos == lastPos && moved
             return; end
         
-        % axes
-        cla(hAxis);
-        gca = hAxis;
-        
         % compute pixel range from axis properties
-        xl = get(hAxis,'XLim');
-        yl = get(hAxis,'YLim');
+        xl = [0 1];
+        yl = [0 1];
         fp = get(hFig,'Position');
         ap = get(hAxis,'Position');
         pixels = (fp(3))*(ap(3)-ap(1));
-        ylr = yl(1) + opts.yrange*(yl(2)-yl(1));
-        channel_y = (ylr(2):(ylr(1)-ylr(2))/(size(new.data,1)-1):ylr(1))';
-        
-        % Add channel labels to y axis
-        if isfield(old.chanlocs,'labels')
-                  set(hAxis,'ytick',channel_y(end:-1:1));
-            labels = {old.chanlocs.labels};
-            set(hAxis,'yticklabel',labels(end:-1:1));
-        end
+        ylr = [opts.yrange(1) opts.yrange(2)];
         
         % compute sample range
         wndsamples = opts.wndlen * new.srate;
@@ -251,10 +258,16 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         insert_nans = @(Y) reshape([Y, NaN(size(Y,1),1)]', 1, []);
         x_nan = insert_nans(repmat(xrange, size(oldwnd,1), 1));
         
+        % Hide all line objects first
+        set(h_old_line, 'Visible', 'off');
+        set(h_new_line, 'Visible', 'off');
+        set(h_bad_line, 'Visible', 'off');
+        set(h_diff_line, 'Visible', 'off');
+        
         switch opts.display_mode
             case 'both'
-                title([tit '; superposition'],'Interpreter','none');
-                h_old = plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
+                title(hAxis, [tit '; superposition'],'Interpreter','none');
+                set(h_old_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*oldwnd), 'Visible', 'on');
                 
                 % Check for bad channels to highlight in red
                 if isfield(new, 'etc') && isfield(new.etc, 'GEDAI') && isfield(new.etc.GEDAI, 'bad_channels_removed') && ~isempty(new.etc.GEDAI.bad_channels_removed)
@@ -264,24 +277,34 @@ set(hFig, 'ResizeFcn', @on_window_resized);
                     % Plot good channels in newcol
                     newwnd_good = nan(size(newwnd));
                     newwnd_good(good_chans,:) = newwnd(good_chans,:);
-                    h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd_good), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                    set(h_new_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*newwnd_good), 'Visible', 'on');
                     
                     % Plot bad channels in magenta to distinguish from original red data
                     newwnd_bad = nan(size(newwnd));
                     newwnd_bad(bad_chans,:) = newwnd(bad_chans,:);
-                    plot(x_nan, insert_nans(yoffset + scale.*newwnd_bad), 'Color',[1 0 1],'LineWidth',opts.line_width(end));
+                    set(h_bad_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*newwnd_bad), 'Visible', 'on');
                 else
-                    h_new = plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                    set(h_new_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*newwnd), 'Visible', 'on');
                 end
             case 'new'
-                title([tit '; cleaned'],'Interpreter','none');
-                plot(x_nan, insert_nans(yoffset + scale.*newwnd), 'Color',opts.newcol,'LineWidth',opts.line_width(end));
+                title(hAxis, [tit '; cleaned'],'Interpreter','none');
+                set(h_new_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*newwnd), 'Visible', 'on');
             case 'old'
-                title([tit '; original'],'Interpreter','none');
-                plot(x_nan, insert_nans(yoffset + scale.*oldwnd), 'Color',opts.oldcol,'LineWidth',opts.line_width(1));
+                title(hAxis, [tit '; original'],'Interpreter','none');
+                set(h_old_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*oldwnd), 'Visible', 'on');
             case 'diff'
-                title([tit '; difference'],'Interpreter','none');
-                plot(x_nan, insert_nans(yoffset + scale.*(oldwnd-newwnd)), 'Color',opts.newcol,'LineWidth',opts.line_width(1));
+                title(hAxis, [tit '; difference'],'Interpreter','none');
+                set(h_diff_line, 'XData', x_nan, 'YData', insert_nans(yoffset + scale.*(oldwnd-newwnd)), 'Visible', 'on');
+        end
+        
+        % Assign output variables in outer scope
+        h_old = h_old_line;
+        h_new = h_new_line;
+        
+        % Clear existing event lines
+        if ~isempty(h_event_lines)
+            delete(h_event_lines(ishghandle(h_event_lines)));
+            h_event_lines = [];
         end
         
         % also plot events
@@ -296,8 +319,6 @@ set(hFig, 'ResizeFcn', @on_window_resized);
                 handles = [];
                 labels = {};
                 for ty = visible_types(:)'
-                    % plot line instances in the right color
-                    % curtype = ty{1}; % same fix as above
                     if isnumeric(ty)
                         curtype = ty(1);
                     else
@@ -305,26 +326,31 @@ set(hFig, 'ResizeFcn', @on_window_resized);
                     end
                     curcolor = opts.event_colormap.values(strcmp(opts.event_colormap.keys,curtype),:);
                     matchpos = strcmp(evttypes,curtype);
-                    h = line([evtpos(matchpos);evtpos(matchpos)],repmat([0;1],1,nnz(matchpos)),'Color',curcolor);
+                    h = line(hAxis, [evtpos(matchpos);evtpos(matchpos)],repmat([0;1],1,nnz(matchpos)),'Color',curcolor);
+                    h_event_lines = [h_event_lines; h(:)];
                     handles(end+1) = h(1);
                     labels{end+1} = curtype;
                 end
                 if opts.show_eventlegend
-                    legend(handles,labels,'Location','NorthWest');
+                    legend(hAxis, handles,labels,'Location','NorthWest');
                     have_eventlegend = true;
                 elseif have_eventlegend
-                    legend off;
+                    legend(hAxis, 'off');
                     have_eventlegend = false;
                 end
             end
         end
-        axis([0 1 0 1]);
+        axis(hAxis, [0 1 0 1]);
         
         if opts.add_legend && ~have_signallegend
-            legend([h_old(1);h_new(1)],'Original','Corrected');
+            legend(hAxis, [h_old_line; h_new_line],'Original','Corrected');
             have_signallegend = 1;
         end
-        drawnow;
+        try
+            drawnow limitrate;
+        catch
+            drawnow;
+        end
         
         lastPos = relPos;
     end
