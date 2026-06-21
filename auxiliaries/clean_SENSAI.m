@@ -37,15 +37,12 @@ function [cov_signal_epoched, cov_noise_epoched, artifact_threshold_out,Treshold
 % --- PRE-ALLOCATION ---
 num_chans = size(Eval, 1);
 num_epochs = size(Eval, 3);
-% Pre-allocate the array to its full size with the correct complex type.
-all_diagonals = complex(zeros(num_chans * num_epochs, 1));
-for i = 1:num_epochs
-    start_idx = (i-1) * num_chans + 1;
-    end_idx = i * num_chans;
-    all_diagonals(start_idx:end_idx) = diag(Eval(:,:,i));
-end
+base_diag = (1 : (num_chans + 1) : num_chans^2)';
+all_indices = base_diag + (0 : num_epochs-1) * num_chans^2;
+all_diagonals = Eval(all_indices(:));
 % Use the magnitude (a real value) for all subsequent calculations.
 magnitudes = abs(all_diagonals);
+all_evals_mat = reshape(magnitudes, num_chans, num_epochs);
 log_Eig_val_all = log(magnitudes(magnitudes > 0)) + 100;
 
 
@@ -82,7 +79,7 @@ cov_noise_epoched = zeros(num_chans, num_chans, num_epochs, 'like', Eval);
 
 for i = 1:num_epochs
     % Determine which components are artifacts based on eigenvalues
-    current_evals = abs(diag(Eval(:,:,i)));
+    current_evals = all_evals_mat(:, i);
     threshold_val = exp(Treshold1 - 100);
     
     % 'bad_indices' are indices of ARTIFACT components (Large Eigenvalues)

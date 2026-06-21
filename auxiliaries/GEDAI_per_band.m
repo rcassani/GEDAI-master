@@ -344,17 +344,14 @@ if ~isinf(smoothing_window_seconds)
     original_epoched = reshape(original_data(:, 1:len_to_use), size(original_data, 1), epoch_samples, []);
     artifacts_epoched = reshape(artifacts_data(:, 1:len_to_use), size(artifacts_data, 1), epoch_samples, []);
     num_epochs_enova = size(original_epoched, 3);
-    enova_per_epoch = zeros(1, num_epochs_enova);
-    for i = 1:num_epochs_enova
-        var_orig = var(reshape(original_epoched(:,:,i), [], 1));
-        var_art = var(reshape(artifacts_epoched(:,:,i), [], 1));
-        if var_orig > 0
-            enova_per_epoch(i) = var_art / var_orig;
-        else
-            enova_per_epoch(i) = 0;
-        end
-    end
     if num_epochs_enova > 0
+        original_flat = reshape(original_epoched, [], num_epochs_enova);
+        artifacts_flat = reshape(artifacts_epoched, [], num_epochs_enova);
+        var_orig = var(original_flat, 0, 1);
+        var_art = var(artifacts_flat, 0, 1);
+        enova_per_epoch = zeros(1, num_epochs_enova);
+        valid = var_orig > 0;
+        enova_per_epoch(valid) = var_art(valid) ./ var_orig(valid);
         ENOVA = mean(enova_per_epoch);
     else
         ENOVA = 0;
@@ -620,21 +617,14 @@ else
     artifacts_epoched = reshape(artifacts_data(:, 1:len_to_use), size(artifacts_data, 1), epoch_samples, []);
     
     num_epochs_enova = size(original_epoched, 3);
-    enova_per_epoch = zeros(1, num_epochs_enova);
-    
-    for i = 1:num_epochs_enova
-        % Calculate variance for this epoch (across all channels and time points in epoch)
-        var_orig = var(reshape(original_epoched(:,:,i), [], 1));
-        var_art = var(reshape(artifacts_epoched(:,:,i), [], 1));
-        
-        if var_orig > 0
-            enova_per_epoch(i) = var_art / var_orig;
-        else
-            enova_per_epoch(i) = 0; % Avoid division by zero
-        end
-    end
-    
     if num_epochs_enova > 0
+        original_flat = reshape(original_epoched, [], num_epochs_enova);
+        artifacts_flat = reshape(artifacts_epoched, [], num_epochs_enova);
+        var_orig = var(original_flat, 0, 1);
+        var_art = var(artifacts_flat, 0, 1);
+        enova_per_epoch = zeros(1, num_epochs_enova);
+        valid = var_orig > 0;
+        enova_per_epoch(valid) = var_art(valid) ./ var_orig(valid);
         ENOVA = mean(enova_per_epoch);
     else
         ENOVA = 0;

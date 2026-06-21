@@ -891,12 +891,12 @@ if num_epochs_ch > 0
     orig_epoched = reshape(orig_data_trunc, size(orig_data_trunc, 1), epoch_samples, []);
     noise_epoched = reshape(noise_data_trunc, size(noise_data_trunc, 1), epoch_samples, []);
     
-    enova_ch_epochs = zeros(size(orig_data_trunc, 1), num_epochs_ch);
-    for ep = 1:num_epochs_ch
-        var_orig = var(orig_epoched(:,:,ep), 0, 2);
-        var_noise = var(noise_epoched(:,:,ep), 0, 2);
-        enova_ch_epochs(:, ep) = var_noise ./ var_orig;
-    end
+    var_orig = var(orig_epoched, 0, 2);
+    var_noise = var(noise_epoched, 0, 2);
+    n_chans = size(orig_data_trunc, 1);
+    var_orig_2d = reshape(var_orig, n_chans, []);
+    var_noise_2d = reshape(var_noise, n_chans, []);
+    enova_ch_epochs = var_noise_2d ./ var_orig_2d;
     ENOVA_per_channel = mean(enova_ch_epochs, 2);
 else
     var_artifacts_per_channel = var(EEGartifacts.data, 0, 2);

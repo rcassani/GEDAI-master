@@ -98,18 +98,14 @@ opts = hlp_varargin2struct(varargin, ...
     {'add_legend','AddLegend'},false,...        % add a signal legend
     {'equalize_channel_scaling','EqualizeChannelScaling'},false);  % optionally equalize the channel scaling
 
-% ensure that the data are not epoched and expand the rejections with NaN's (now both should have the same size)
+% ensure that the data are not epoched (but do NOT expand rejections to save memory)
 if opts.show_removed_portions
     new = expand_rejections(to_continuous(new));
     old = expand_rejections(to_continuous(old));
 end
 new.chanlocs = old.chanlocs;
 
-% correct for filter delay
-if isfield(new.etc,'filter_delay')
-    new.data = new.data(:,[1+round(new.etc.filter_delay*new.srate):end end:-1:(end+1-round(new.etc.filter_delay*new.srate))]); end
-if isfield(old.etc,'filter_delay')
-    old.data = old.data(:,[1+round(old.etc.filter_delay*old.srate):end end:-1:(end+1-round(old.etc.filter_delay*old.srate))]); end
+% note: filter delay is now corrected on-the-fly inside window slicing functions
 
 % make sure that the old data is high-passed the same way as the new data
 if opts.highpass_old && isfield(new.etc,'clean_drifts_kernel') && ~isfield(old.etc,'clean_drifts_kernel')
@@ -155,6 +151,25 @@ old_iqr(isnan(old_iqr)) = deal(mean(old_iqr(~isnan(old_iqr))));
 new_iqr = 2*mad(quantile(new.data',1000),1)';
 new_iqr(isnan(new_iqr)) = deal(mean(new_iqr(~isnan(new_iqr))));
 
+% Get actual dimensions of expanded channel and sample spaces
+if isfield(new.etc, 'clean_channel_mask')
+    new_nbchan = length(new.etc.clean_channel_mask);
+    new_pnts = length(new.etc.clean_sample_mask);
+else
+    new_nbchan = size(new.data, 1);
+    new_pnts = size(new.data, 2);
+end
+
+% Precalculate filter delays in samples to shift on-the-fly
+new_delay_samples = 0;
+if isfield(new.etc, 'filter_delay')
+    new_delay_samples = round(new.etc.filter_delay * new.srate);
+end
+old_delay_samples = 0;
+if isfield(old.etc, 'filter_delay')
+    old_delay_samples = round(old.etc.filter_delay * old.srate);
+end
+
 % create figure & slider
 lastPos = 0;
 %hFig = figure('ResizeFcn',@on_window_resized,'KeyPressFcn',@(varargin)on_key(varargin{2}.Key)); hold; axis();
@@ -165,7 +180,7 @@ hAxis = gca;
 xlim(hAxis, [0 1]);
 ylim(hAxis, [0 1]);
 ylr = [opts.yrange(1) opts.yrange(2)];
-channel_y = (ylr(2):(ylr(1)-ylr(2))/(size(new.data,1)-1):ylr(1))';
+channel_y = (ylr(2):(ylr(1)-ylr(2))/(new_nbchan-1):ylr(1))';
 if isfield(old.chanlocs,'labels')
     set(hAxis,'ytick',channel_y(end:-1:1));
     labels = {old.chanlocs.labels};
@@ -213,13 +228,15 @@ set(hFig, 'ResizeFcn', @on_window_resized);
         
         % compute sample range
         wndsamples = opts.wndlen * new.srate;
-        pos = floor((size(new.data,2)-wndsamples)*relPos);
+        pos = floor((new_pnts-wndsamples)*relPos);
         wndindices = 1 + floor(0:wndsamples/pixels:(wndsamples-1));
         wndrange = pos+wndindices;
-        wndrange(wndrange > length(old.data)) = length(old.data);
+        wndrange(wndrange > new_pnts) = new_pnts;
         
-        oldwnd = old.data(:,wndrange);
-        newwnd = new.data(:,wndrange);
+        % Get data on-the-fly while accounting for filter delay shifts
+        oldwnd = get_raw_window(old.data, wndrange + old_delay_samples);
+        newwnd = get_window_data(new, wndrange + new_delay_samples);
+        
         switch opts.scale_by
             case 'allnew'
                 iqrange = new_iqr;
@@ -231,11 +248,11 @@ set(hFig, 'ResizeFcn', @on_window_resized);
             case {'wndold','old'}
                 iqrange = mad(oldwnd',1)';
             case 'noscale'
-                iqrange = ones(size(new.data,1),1);
+                iqrange = ones(new_nbchan,1);
             otherwise
                 error('Unsupported scale_by option.');
         end
-        scale = ((ylr(2)-ylr(1))/size(new.data,1)) ./ (opts.yscaling*iqrange); scale(~isfinite(scale)) = 0;
+        scale = ((ylr(2)-ylr(1))/new_nbchan) ./ (opts.yscaling*iqrange); scale(~isfinite(scale)) = 0;
         scale(scale>median(scale)*3) = median(scale);
         scale = scale(:);
         scale = repmat(scale,1,length(wndindices));
@@ -386,16 +403,11 @@ set(hFig, 'ResizeFcn', @on_window_resized);
     end
 
     function EEG = expand_rejections(EEG)
-        % reformat the new data so that it can be super-imposed with the old data
-        [EEG.nbchan,EEG.pnts] = size(EEG.data);
         if ~isfield(EEG.etc,'clean_channel_mask')
-            EEG.etc.clean_channel_mask = true(1,EEG.nbchan); end
+            EEG.etc.clean_channel_mask = true(1, size(EEG.data,1)); end
         if ~isfield(EEG.etc,'clean_sample_mask')
-            EEG.etc.clean_sample_mask = true(1,EEG.pnts); end
-        tmpdata = nan(length(EEG.etc.clean_channel_mask),length(EEG.etc.clean_sample_mask));
-        tmpdata(EEG.etc.clean_channel_mask,EEG.etc.clean_sample_mask) = EEG.data;
-        EEG.data = tmpdata;
-        [EEG.nbchan,EEG.pnts] = size(EEG.data);
+            EEG.etc.clean_sample_mask = true(1, size(EEG.data,2)); end
+        EEG.etc.cumsum_mask = cumsum(EEG.etc.clean_sample_mask);
     end
 
     function on_key(key)
@@ -453,4 +465,33 @@ elseif ~isempty(map.keys)
 else
     map.values = [];
 end
+end
+
+function wnd_data = get_window_data(EEG, wndrange)
+    if isfield(EEG.etc, 'clean_sample_mask') && isfield(EEG.etc, 'cumsum_mask')
+        wnd_data = nan(length(EEG.etc.clean_channel_mask), length(wndrange), 'like', EEG.data);
+        max_len = length(EEG.etc.clean_sample_mask);
+        in_bounds = (wndrange >= 1) & (wndrange <= max_len);
+        if any(in_bounds)
+            clipped_range = wndrange(in_bounds);
+            is_kept = EEG.etc.clean_sample_mask(clipped_range);
+            out_cols = find(in_bounds);
+            out_cols = out_cols(is_kept);
+            compact_indices = EEG.etc.cumsum_mask(clipped_range(is_kept));
+            if ~isempty(compact_indices)
+                wnd_data(EEG.etc.clean_channel_mask, out_cols) = EEG.data(:, compact_indices);
+            end
+        end
+    else
+        wnd_data = get_raw_window(EEG.data, wndrange);
+    end
+end
+
+function wnd_data = get_raw_window(data, wndrange)
+    wnd_data = nan(size(data, 1), length(wndrange), 'like', data);
+    max_len = size(data, 2);
+    in_bounds = (wndrange >= 1) & (wndrange <= max_len);
+    if any(in_bounds)
+        wnd_data(:, in_bounds) = data(:, wndrange(in_bounds));
+    end
 end
