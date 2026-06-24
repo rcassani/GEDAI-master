@@ -75,7 +75,7 @@ if ~isinf(smoothing_window_seconds)
     % =========================================================================
     % MEMORY-OPTIMIZED SLIDING WINDOW PATH
     % =========================================================================
-    disp('Executing Sliding Window GEVD Denoising...');
+    disp('Executing Sliding Window GEDAI Denoising...');
     
     window_seconds = smoothing_window_seconds;
     window_epochs = max(1, round(window_seconds / epoch_size));
