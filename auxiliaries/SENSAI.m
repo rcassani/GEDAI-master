@@ -35,49 +35,115 @@ function [SIGNAL_subspace_similarity, NOISE_subspace_similarity, SENSAI_score] =
 % ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 % THE POSSIBILITY OF SUCH DAMAGE.
 
-[cov_signal_epoched, cov_noise_epoched] = clean_SENSAI(artifact_threshold, refCOV, Eval, Evec, cov_total, signal_type);
-
-%% Estimate Signal Quality
 %% Estimate Signal Quality
 num_chans = size(refCOV, 1);
-
-% Top eigenvectors of reference covariance (Calculated outside and passed in)
-
-num_epochs = size(cov_signal_epoched, 3);
-
-SIGNAL_subspace_similarity_distribution = zeros(1, num_epochs);
-NOISE_subspace_similarity_distribution = zeros(1, num_epochs);
+num_epochs = size(Eval, 3);
 
 % Fast Subspace Iteration Setup (2-step Subspace Iteration)
 M = min(size(evecs_Template_cov, 2), SSI_top_PCs);
 Template_guess = evecs_Template_cov(:, 1:M);
 
-for epoch = 1:num_epochs
-    % SIGNAL SUBSPACE similarity via 2-step Fast Subspace Iteration
-    cov_signal = cov_signal_epoched(:,:,epoch);
-    Y1_sig = cov_signal * Template_guess;
-    [Q1_sig, ~] = qr(Y1_sig, 0);
-    Y2_sig = cov_signal * Q1_sig;
-    [evecs_signal, ~] = qr(Y2_sig, 0);
-    SIGNAL_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
+base_diag = (1 : (num_chans + 1) : num_chans^2)';
+all_indices = base_diag + (0 : num_epochs-1) * num_chans^2;
+all_diagonals = Eval(all_indices(:));
+magnitudes = abs(all_diagonals);
+all_evals_mat = reshape(magnitudes, num_chans, num_epochs);
+log_Eig_val_all = log(magnitudes(magnitudes > 0)) + 100;
 
-    % % NOISE SUBSPACE similarity via 2-step Fast Subspace Iteration
-    cov_noise = cov_noise_epoched(:,:,epoch);
-    
-    % % Define a tolerance (e.g., 1e-12 or using eps)
-    tol = 1e-12; 
-    % Check if the maximum absolute value is below the tolerance
-    if max(abs(cov_noise(:))) < tol
-        % Use the size of Template_guess to construct the identity-like matrix
-        Y1_noise = eye(size(Template_guess)); 
+correction_factor = 1.00;
+T1 = correction_factor * (105 - artifact_threshold) / 100;
+
+if strcmpi(signal_type, 'eeg')
+    percentile_threshold = 98;
+elseif strcmpi(signal_type, 'meg')
+    percentile_threshold = 99;
+end
+Treshold1 = T1 * prctile(log_Eig_val_all, percentile_threshold);
+threshold_val = exp(Treshold1 - 100);
+
+refCOV = real(refCOV);
+refCOV = (refCOV + refCOV') / 2;
+regularization_lambda = 0.05;
+reg_val = trace(refCOV) / num_chans;
+refCOV_reg = (1-regularization_lambda)*refCOV + regularization_lambda*reg_val*eye(num_chans, 'like', refCOV);
+refCOV_reg = (refCOV_reg + refCOV_reg') / 2;
+
+% Precompute constant T
+T = refCOV_reg * Template_guess;
+
+SIGNAL_subspace_similarity_distribution = zeros(1, num_epochs);
+NOISE_subspace_similarity_distribution = zeros(1, num_epochs);
+tol = 1e-12;
+
+for epoch = 1:num_epochs
+    current_evals = all_evals_mat(:, epoch);
+    bad_indices = current_evals >= threshold_val;
+    num_bad = sum(bad_indices);
+    good_indices = ~bad_indices;
+    num_good = sum(good_indices);
+
+    % --- SIGNAL SUBSPACE ---
+    if num_good >= M
+        % Fast associative path
+        Evec_good = Evec(:, good_indices, epoch);
+        d_good = current_evals(good_indices);
+        Y1_sig = refCOV_reg * (Evec_good * (d_good .* (Evec_good' * T)));
+        [Q1_sig, ~] = qr(Y1_sig, 0);
+        T_sig = refCOV_reg * Q1_sig;
+        Y2_sig = refCOV_reg * (Evec_good * (d_good .* (Evec_good' * T_sig)));
+        [evecs_signal, ~] = qr(Y2_sig, 0);
+        SIGNAL_subspace_similarity_distribution(epoch) = abs(det(evecs_signal' * Template_guess));
+    elseif num_good > 0
+        % Fallback for rank-deficient signal
+        Evec_good = Evec(:, good_indices, epoch);
+        d_good = current_evals(good_indices);
+        V_good_rows = Evec_good' * refCOV_reg;
+        cov_signal = V_good_rows' * (V_good_rows .* d_good);
+        cov_signal = (cov_signal + cov_signal') / 2;
+        Y1_sig = cov_signal * Template_guess;
+        [Q1_sig, ~] = qr(Y1_sig, 0);
+        Y2_sig = cov_signal * Q1_sig;
+        [evecs_signal, ~] = qr(Y2_sig, 0);
+        SIGNAL_subspace_similarity_distribution(epoch) = abs(det(evecs_signal' * Template_guess));
     else
-        Y1_noise = cov_noise * Template_guess;
+        % No good components
+        evecs_signal = eye(num_chans, M);
+        SIGNAL_subspace_similarity_distribution(epoch) = abs(det(evecs_signal' * Template_guess));
     end
 
-    [Q1_noise, ~] = qr(Y1_noise, 0);
-    Y2_noise = cov_noise * Q1_noise;
-    [evecs_noise, ~] = qr(Y2_noise, 0);
-    NOISE_subspace_similarity_distribution(epoch) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
+    % --- NOISE SUBSPACE ---
+    if num_bad >= M
+        % Fast associative path
+        Evec_bad = Evec(:, bad_indices, epoch);
+        d_bad = current_evals(bad_indices);
+        Y1_noise = refCOV_reg * (Evec_bad * (d_bad .* (Evec_bad' * T)));
+        [Q1_noise, ~] = qr(Y1_noise, 0);
+        T_noise = refCOV_reg * Q1_noise;
+        Y2_noise = refCOV_reg * (Evec_bad * (d_bad .* (Evec_bad' * T_noise)));
+        [evecs_noise, ~] = qr(Y2_noise, 0);
+        NOISE_subspace_similarity_distribution(epoch) = abs(det(evecs_noise' * Template_guess));
+    elseif num_bad > 0
+        % Fallback for rank-deficient noise
+        Evec_bad = Evec(:, bad_indices, epoch);
+        d_bad = current_evals(bad_indices);
+        V_bad_rows = Evec_bad' * refCOV_reg;
+        cov_noise = V_bad_rows' * (V_bad_rows .* d_bad);
+        cov_noise = (cov_noise + cov_noise') / 2;
+        
+        if max(abs(cov_noise(:))) < tol
+            Y1_noise = eye(num_chans, M);
+        else
+            Y1_noise = cov_noise * Template_guess;
+        end
+        [Q1_noise, ~] = qr(Y1_noise, 0);
+        Y2_noise = cov_noise * Q1_noise;
+        [evecs_noise, ~] = qr(Y2_noise, 0);
+        NOISE_subspace_similarity_distribution(epoch) = abs(det(evecs_noise' * Template_guess));
+    else
+        % No bad components
+        evecs_noise = eye(num_chans, M);
+        NOISE_subspace_similarity_distribution(epoch) = abs(det(evecs_noise' * Template_guess));
+    end
 end
 
 %% Compute SENSAI Score

@@ -256,25 +256,103 @@ if ~isinf(smoothing_window_seconds)
         artifacts_data_1(:, chunk_samples_start:chunk_samples_end) = artifacts_chunk;
         
         % Accumulate analytical SENSAI statistics locally
-        [cov_signal_chunk, cov_noise_chunk] = clean_SENSAI(mean_thresh, refCOV, Eval_chunk, Evec_chunk, [], signal_type);
+        % Fast Hybrid Associative Double-QR for SENSAI statistics tracker
+        base_diag = (1 : (N_EEG_electrodes + 1) : N_EEG_electrodes^2)';
+        all_indices = base_diag + (0 : c_len-1) * N_EEG_electrodes^2;
+        all_diagonals = Eval_chunk(all_indices(:));
+        magnitudes = abs(all_diagonals);
+        all_evals_chunk = reshape(magnitudes, N_EEG_electrodes, c_len);
+        log_Eig_val_chunk = log(magnitudes(magnitudes > 0)) + 100;
+        
+        correction_factor = 1.00;
+        T1 = correction_factor * (105 - mean_thresh) / 100;
+        if strcmpi(signal_type, 'eeg')
+            percentile_threshold = 98;
+        elseif strcmpi(signal_type, 'meg')
+            percentile_threshold = 99;
+        end
+        if ~isempty(log_Eig_val_chunk)
+            Treshold_chunk = T1 * prctile(log_Eig_val_chunk, percentile_threshold);
+        else
+            Treshold_chunk = 0;
+        end
+        threshold_val = exp(Treshold_chunk - 100);
+        
+        T_proj = refCOV_reg * Template_guess;
+        M_proj = size(Template_guess, 2);
+        tol_val = 1e-12;
+        
         for i = 1:c_len
             global_epo_idx = c_start + i - 1;
-            cov_signal = cov_signal_chunk(:,:,i);
-            Y1_sig = cov_signal * Template_guess;
-            [Q1_sig, ~] = qr(Y1_sig, 0);
-            Y2_sig = cov_signal * Q1_sig;
-            [evecs_signal, ~] = qr(Y2_sig, 0);
-            SIGNAL_subspace_dist(global_epo_idx) = prod(subspace_angles(evecs_signal, evecs_Template_cov));
+            current_evals = all_evals_chunk(:, i);
+            bad_indices = current_evals >= threshold_val;
+            num_bad = sum(bad_indices);
+            good_indices = ~bad_indices;
+            num_good = sum(good_indices);
             
-            cov_noise = cov_noise_chunk(:,:,i);
-            Y1_noise = cov_noise * Template_guess;
-            [Q1_noise, ~] = qr(Y1_noise, 0);
-            Y2_noise = cov_noise * Q1_noise;
-            [evecs_noise, ~] = qr(Y2_noise, 0);
-            NOISE_subspace_dist(global_epo_idx) = prod(subspace_angles(evecs_noise, evecs_Template_cov));
+            % --- SIGNAL SUBSPACE ---
+            if num_good >= M_proj
+                % Fast associative path
+                Evec_good = Evec_chunk(:, good_indices, i);
+                d_good = current_evals(good_indices);
+                Y1_sig = refCOV_reg * (Evec_good * (d_good .* (Evec_good' * T_proj)));
+                [Q1_sig, ~] = qr(Y1_sig, 0);
+                T_sig = refCOV_reg * Q1_sig;
+                Y2_sig = refCOV_reg * (Evec_good * (d_good .* (Evec_good' * T_sig)));
+                [evecs_signal, ~] = qr(Y2_sig, 0);
+                SIGNAL_subspace_dist(global_epo_idx) = abs(det(evecs_signal' * Template_guess));
+            elseif num_good > 0
+                % Fallback for rank-deficient signal
+                Evec_good = Evec_chunk(:, good_indices, i);
+                d_good = current_evals(good_indices);
+                V_good_rows = Evec_good' * refCOV_reg;
+                cov_signal = V_good_rows' * (V_good_rows .* d_good);
+                cov_signal = (cov_signal + cov_signal') / 2;
+                Y1_sig = cov_signal * Template_guess;
+                [Q1_sig, ~] = qr(Y1_sig, 0);
+                Y2_sig = cov_signal * Q1_sig;
+                [evecs_signal, ~] = qr(Y2_sig, 0);
+                SIGNAL_subspace_dist(global_epo_idx) = abs(det(evecs_signal' * Template_guess));
+            else
+                evecs_signal = eye(N_EEG_electrodes, M_proj);
+                SIGNAL_subspace_dist(global_epo_idx) = abs(det(evecs_signal' * Template_guess));
+            end
+            
+            % --- NOISE SUBSPACE ---
+            if num_bad >= M_proj
+                % Fast associative path
+                Evec_bad = Evec_chunk(:, bad_indices, i);
+                d_bad = current_evals(bad_indices);
+                Y1_noise = refCOV_reg * (Evec_bad * (d_bad .* (Evec_bad' * T_proj)));
+                [Q1_noise, ~] = qr(Y1_noise, 0);
+                T_noise = refCOV_reg * Q1_noise;
+                Y2_noise = refCOV_reg * (Evec_bad * (d_bad .* (Evec_bad' * T_noise)));
+                [evecs_noise, ~] = qr(Y2_noise, 0);
+                NOISE_subspace_dist(global_epo_idx) = abs(det(evecs_noise' * Template_guess));
+            elseif num_bad > 0
+                % Fallback for rank-deficient noise
+                Evec_bad = Evec_chunk(:, bad_indices, i);
+                d_bad = current_evals(bad_indices);
+                V_bad_rows = Evec_bad' * refCOV_reg;
+                cov_noise = V_bad_rows' * (V_bad_rows .* d_bad);
+                cov_noise = (cov_noise + cov_noise') / 2;
+                
+                if max(abs(cov_noise(:))) < tol_val
+                    Y1_noise = eye(N_EEG_electrodes, M_proj);
+                else
+                    Y1_noise = cov_noise * Template_guess;
+                end
+                [Q1_noise, ~] = qr(Y1_noise, 0);
+                Y2_noise = cov_noise * Q1_noise;
+                [evecs_noise, ~] = qr(Y2_noise, 0);
+                NOISE_subspace_dist(global_epo_idx) = abs(det(evecs_noise' * Template_guess));
+            else
+                evecs_noise = eye(N_EEG_electrodes, M_proj);
+                NOISE_subspace_dist(global_epo_idx) = abs(det(evecs_noise' * Template_guess));
+            end
         end
         
-        clear eeg_data_chunk EEGdata_epoched_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk cov_signal_chunk cov_noise_chunk;
+        clear eeg_data_chunk EEGdata_epoched_chunk Evec_chunk Eval_chunk cleaned_chunk artifacts_chunk;
     end
     
     % Clean Shifted Stream 2 in Chunks
