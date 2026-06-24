@@ -29,8 +29,8 @@ channel_labels = {EEG.chanlocs.labels};
 channel_labels_sanitized = strrep(channel_labels, '|', '/');
 channel_labels_lower = lower(channel_labels);
 
-output_ref_display_options = {'AvgRef'};
-output_ref_value_options = {''};
+output_ref_display_options = {'AvgRef', 'REST'};
+output_ref_value_options = {'AvgRef', 'REST'};
 
 % Add pairwise average options only when both channels are present.
 if any(strcmp(channel_labels_lower, 'm1')) && any(strcmp(channel_labels_lower, 'm2'))

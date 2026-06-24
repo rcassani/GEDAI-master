@@ -163,6 +163,10 @@ if ~ismember(lower(signal_type), {'eeg', 'meg'})
 end
 signal_type = lower(signal_type);
 
+if isempty(output_reference_channel) && strcmp(signal_type, 'eeg')
+    output_reference_channel = 'AvgRef';
+end
+
 p = fileparts(which('GEDAI'));
 addpath(fullfile(p, 'auxiliaries'));
 tStart = tic;
@@ -208,7 +212,7 @@ if ENOVA_threshold_per_channel < inf
     
     % Run GEDAI with channel rejection disabled (inf) to identify bad channels
     % Also disable epoch rejection in pass 1 so channel variance isn't computed on incomplete data
-    [~, ~, ~, ~, ~, mean_ENOVA_p1, ENOVA_per_epoch_p1, ~, ~, ENOVA_per_channel_val_p1] = GEDAI(EEG_p1, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_p1, parallel, false, inf, inf, signal_type, smoothing_window_seconds);
+    [~, ~, ~, ~, ~, mean_ENOVA_p1, ENOVA_per_epoch_p1, ~, ~, ENOVA_per_channel_val_p1] = GEDAI(EEG_p1, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_p1, parallel, false, inf, inf, signal_type, smoothing_window_seconds, output_reference_channel);
     
     clear EEGclean_p1 EEGartifacts_p1; % Free memory
     
@@ -321,11 +325,25 @@ if ENOVA_threshold_per_channel < inf
         end
         EEGartifacts.data = original_data_kept - EEGclean.data;
         
-        % Re-apply average reference after interpolation for EEG
+        % Re-apply reference after interpolation for EEG
         if strcmp(signal_type, 'eeg')
-            disp('Re-applying average reference after interpolation...');
-            EEGclean = GEDAI_nonRankDeficientAveRef(EEGclean);
-            EEGartifacts = GEDAI_nonRankDeficientAveRef(EEGartifacts);
+            if strcmp(internal_reference, 'REST')
+                disp('Re-applying REST reference after interpolation...');
+                EEGclean_av = GEDAI_nonRankDeficientAveRef(EEGclean);
+                EEGartifacts_av = GEDAI_nonRankDeficientAveRef(EEGartifacts);
+                EEGclean.data = rest_refer(EEGclean_av.data, G_full');
+                EEGartifacts.data = rest_refer(EEGartifacts_av.data, G_full');
+                EEGclean.ref = 'REST';
+                EEGartifacts.ref = 'REST';
+                for chIdx = 1:EEGclean.nbchan
+                    EEGclean.chanlocs(chIdx).ref = 'REST';
+                    EEGartifacts.chanlocs(chIdx).ref = 'REST';
+                end
+            else
+                disp('Re-applying average reference after interpolation...');
+                EEGclean = GEDAI_nonRankDeficientAveRef(EEGclean);
+                EEGartifacts = GEDAI_nonRankDeficientAveRef(EEGartifacts);
+            end
             % Update invariant reference for ENOVA calculation
             original_data_kept = EEGclean.data + EEGartifacts.data;
         end
@@ -380,20 +398,24 @@ if ENOVA_threshold_per_channel < inf
         if visualize_artifacts
             % Compute EEGavRef for visualization
             if strcmp(signal_type, 'eeg')
-                is_standard_avg_ref = max(abs(mean(EEGin.data, 1))) < 1e-5;
-                if is_standard_avg_ref 
-                    EEGavRef_for_vis = EEGin;
-                elseif max(abs(sum(EEGin.data, 1) / (size(EEGin.data, 1) + 1))) < 1e-5
-                    EEGavRef_for_vis = EEGin;
+                if strcmp(internal_reference, 'REST')
+                    EEGavRef_for_vis = EEGavRef;
                 else
-                    EEGavRef_for_vis = GEDAI_nonRankDeficientAveRef(EEGin);
-                end 
+                    is_standard_avg_ref = max(abs(mean(EEGin.data, 1))) < 1e-5;
+                    if is_standard_avg_ref 
+                        EEGavRef_for_vis = EEGin;
+                    elseif max(abs(sum(EEGin.data, 1) / (size(EEGin.data, 1) + 1))) < 1e-5
+                        EEGavRef_for_vis = EEGin;
+                    else
+                        EEGavRef_for_vis = GEDAI_nonRankDeficientAveRef(EEGin);
+                    end 
+                end
             else
                 EEGavRef_for_vis = EEGin;
             end
             
             % Create refCOV for full channel space
-            refCOV_full = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef_for_vis, signal_type);
+            refCOV_full = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef_for_vis, signal_type, internal_reference);
             
             if ~isempty(refCOV_full)
                 if strcmpi(signal_type, 'meg'), vis_pcs = 4; else, vis_pcs = 3; end
@@ -487,29 +509,53 @@ EEGin.data=double(EEGin.data);
 
 %% Pre-processing
 if strcmp(signal_type, 'eeg')
+    if ~ischar(ref_matrix_type)
+        disp('Warning: Custom covariance matrix detected. Falling back to average referencing.');
+        internal_reference = 'AvgRef';
+    elseif strcmpi(output_reference_channel, 'REST')
+        internal_reference = 'REST';
+    else
+        internal_reference = 'AvgRef';
+    end
+else
+    internal_reference = 'None';
+end
+
+if strcmp(signal_type, 'eeg')
     % Check if data is already average referenced (Standard or via EEGLAB metadata)
     is_standard_avg_ref = max(abs(mean(EEGin.data, 1))) < 1e-5;
        
     if is_standard_avg_ref 
         disp([newline 'Data is already average referenced. Skipping internal average referencing.']);
-        EEGavRef = EEGin;
+        EEG_av = EEGin;
 
     elseif max(abs(sum(EEGin.data, 1) / (size(EEGin.data, 1) + 1))) < 1e-5
         % Corrected: Removed assignment and evaluated the math directly
         disp([newline 'Data matches non rank-deficient average reference definition. Skipping internal average referencing.']);
-        EEGavRef = EEGin;
+        EEG_av = EEGin;
         
     else
-        EEGavRef = GEDAI_nonRankDeficientAveRef(EEGin); % non rank-deficient average referencing
+        EEG_av = GEDAI_nonRankDeficientAveRef(EEGin); % non rank-deficient average referencing
     end 
 else
     % For MEG or other signal types where average referencing is not performed
-    EEGavRef = EEGin;
+    EEG_av = EEGin;
 end
 
 
 %% Create Reference Covariance Matrix (refCOV)
-refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_type);
+[refCOV, G_full] = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEG_av, signal_type, internal_reference);
+
+if strcmp(internal_reference, 'REST')
+    EEGavRef = EEG_av;
+    EEGavRef.data = rest_refer(EEG_av.data, G_full');
+    EEGavRef.ref = 'REST';
+    for chIdx = 1:EEGavRef.nbchan
+        EEGavRef.chanlocs(chIdx).ref = 'REST';
+    end
+else
+    EEGavRef = EEG_av;
+end
 
 % --- Wavelet-based High-Pass Filtering ---
 % Calculate required level to resolve lowcut_frequency
@@ -1265,6 +1311,34 @@ if isempty(output_reference_channel)
     return;
 end
 
+if strcmpi(output_reference_channel, 'REST')
+    applied_reference_label = 'REST';
+    EEG.ref = 'REST';
+    if isfield(EEG, 'chanlocs') && ~isempty(EEG.chanlocs)
+        for chIdx = 1:EEG.nbchan
+            EEG.chanlocs(chIdx).ref = 'REST';
+        end
+    end
+    return;
+end
+
+if strcmpi(output_reference_channel, 'AvgRef')
+    % If not already average referenced, do it now
+    is_standard_avg_ref = max(abs(mean(EEG.data, 1))) < 1e-5;
+    if ~is_standard_avg_ref && ~(max(abs(sum(EEG.data, 1) / (size(EEG.data, 1) + 1))) < 1e-5)
+        EEG = GEDAI_nonRankDeficientAveRef(EEG);
+    else
+        EEG.ref = 'average';
+        if isfield(EEG, 'chanlocs') && ~isempty(EEG.chanlocs)
+            for chIdx = 1:EEG.nbchan
+                EEG.chanlocs(chIdx).ref = 'average';
+            end
+        end
+    end
+    applied_reference_label = 'average';
+    return;
+end
+
 if ~isfield(EEG, 'chanlocs') || isempty(EEG.chanlocs)
     warning('GEDAI:ReferenceChannelNotFound', 'Cannot re-reference output: channel locations are missing.');
     return;
@@ -1319,14 +1393,22 @@ for chIdx = 1:EEG.nbchan
 end
 end
 
-function refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_type)
+function [refCOV, G_full] = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_type, internal_reference)
+    if nargin < 5
+        internal_reference = 'AvgRef';
+    end
+    G_full = [];
     if ~ischar(ref_matrix_type)
         refCOV = ref_matrix_type; % Use custom covariance matrix
         disp([newline 'Using custom covariance matrix']);
     else
         switch ref_matrix_type
             case 'precomputed'
-                disp([newline 'GEDAI Leadfield model: BEM precomputed for EEG'])
+                if strcmp(internal_reference, 'REST')
+                    disp([newline 'GEDAI Leadfield model: BEM precomputed for EEG (REST reference)'])
+                else
+                    disp([newline 'GEDAI Leadfield model: BEM precomputed for EEG'])
+                end
                 L = load('fsavLEADFIELD_4_GEDAI.mat');
                 electrodes_labels = {EEGin.chanlocs.labels};
                 template_electrode_labels = {L.leadfield4GEDAI.electrodes.Name};
@@ -1356,7 +1438,13 @@ function refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_t
                     missing_labels = strjoin(electrodes_labels(chanidx == 0), ', ');
                     error(['Electrode labels not found: ' missing_labels '. Either remove them using ''Edit ->Select data'' or select the ''interpolated'' leadfield matrix for non-standard locations.']);
                 end
-                refCOV = L.leadfield4GEDAI.gram_matrix_avref(chanidx,chanidx);
+                
+                G_full = L.leadfield4GEDAI.Gain(chanidx, :);
+                if strcmp(internal_reference, 'REST')
+                    refCOV = L.leadfield4GEDAI.gram_matrix(chanidx,chanidx);
+                else
+                    refCOV = L.leadfield4GEDAI.gram_matrix_avref(chanidx,chanidx);
+                end
 
             case 'interpolated'
                 % 1. Verification of Spatial Locations
@@ -1366,19 +1454,28 @@ function refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_t
                 
                 if has_cartesian && has_spherical
                     % 2. Leadfield Processing
-                    disp([newline 'GEDAI Leadfield model: BEM warped for EEG'])
+                    if strcmp(internal_reference, 'REST')
+                        disp([newline 'GEDAI Leadfield model: BEM interpolated for EEG (REST reference)'])
+                    else
+                        disp([newline 'GEDAI Leadfield model: BEM interpolated for EEG'])
+                    end
                     L = load('fsavLEADFIELD_4_GEDAI.mat');
                     
-                    % The leadfield data needs to be average referenced before interpolation
+                    % The leadfield data
                     leadfield_EEG = L.leadfield4GEDAI.EEG;
                     
-                    % Average reference the Gain matrix (channels x sources)
-                    % Using non-rank-deficient average reference (to match EEG data processing)
-                    leadfield_EEG.data = L.leadfield4GEDAI.Gain - sum(L.leadfield4GEDAI.Gain, 1) / (size(L.leadfield4GEDAI.Gain, 1) + 1); 
+                    if strcmp(internal_reference, 'REST')
+                        leadfield_EEG.data = L.leadfield4GEDAI.Gain;
+                    else
+                        % Average reference the Gain matrix (channels x sources)
+                        % Using non-rank-deficient average reference (to match EEG data processing)
+                        leadfield_EEG.data = L.leadfield4GEDAI.Gain - sum(L.leadfield4GEDAI.Gain, 1) / (size(L.leadfield4GEDAI.Gain, 1) + 1); 
+                    end
 
                     % 3. Interpolation and Covariance
                     interpolated_EEG = interp_mont_GEDAI(leadfield_EEG, EEGavRef.chanlocs);
-                    refCOV = interpolated_EEG.data * interpolated_EEG.data';
+                    G_full = interpolated_EEG.data;
+                    refCOV = G_full * G_full';
                     
                 else
                     error(['CRITICAL: Channel locations are incomplete. ' ...
@@ -1393,7 +1490,11 @@ function refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_t
 
                 if has_cartesian && has_spherical
                     % 2. Leadfield Processing
-                    disp([newline 'GEDAI Leadfield model: BEM Surface source model'])
+                    if strcmp(internal_reference, 'REST')
+                        disp([newline 'GEDAI Leadfield model: BEM Warped Surface source model (REST reference)'])
+                    else
+                        disp([newline 'GEDAI Leadfield model: BEM Warped Surface source model'])
+                    end
 
                     %  Boundary Element Method (BEM) head model based on EEGLAB/Fieldtrip source model, see https://eeglab.org/tutorials/09_source/Model_Settings.html
                     try
@@ -1414,10 +1515,14 @@ function refCOV = GEDAI_create_refCOV(ref_matrix_type, EEGin, EEGavRef, signal_t
                     
                     DIPFIT_leadfield=cell2mat(EEGin.dipfit.sourcemodel.leadfield); %Gain matrix
 
-                    % Average reference the Gain matrix (channels x sources) using non-rank-deficient average reference 
-                    DIPFIT_leadfield = DIPFIT_leadfield- sum(DIPFIT_leadfield, 1) / (size(DIPFIT_leadfield, 1) + 1); 
+                    if strcmp(internal_reference, 'REST')
+                        G_full = DIPFIT_leadfield;
+                    else
+                        % Average reference the Gain matrix (channels x sources) using non-rank-deficient average reference 
+                        G_full = DIPFIT_leadfield- sum(DIPFIT_leadfield, 1) / (size(DIPFIT_leadfield, 1) + 1); 
+                    end
 
-                    refCOV=DIPFIT_leadfield*DIPFIT_leadfield'; % gram matrix
+                    refCOV=G_full*G_full'; % gram matrix
 
                 else
                      error(['CRITICAL: Channel locations are incomplete. ' ...
