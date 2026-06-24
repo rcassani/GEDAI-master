@@ -1223,7 +1223,7 @@ if ~silent_mode
     disp(' ');
 end
 
-if visualize_artifacts && ~silent_mode
+if visualize_artifacts && ~silent_mode && smoothing_window_seconds ~= Inf
     plot_title = ['GEDAI Sliding Thresholds (' artifact_threshold_type ' | Window: ' num2str(smoothing_window_seconds) ' s | SENSAI: ' num2str(round(SENSAI_score, 1)) '%)'];
     figure('Color', 'w', 'Name', plot_title);
     num_plots = length(artifact_threshold_array_per_band);
