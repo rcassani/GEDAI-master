@@ -151,8 +151,42 @@ if ~isempty(varargin)
     end
     output_reference_channel = strtrim(output_reference_channel);
 end
+
+original_channel_threshold = ENOVA_threshold_per_channel;
+silent_mode = false;
+num_channels_rejected = 0;
+total_original_channels = size(EEGin.data, 1);
+
+if ~isempty(varargin)
+    for vargIdx = 1:length(varargin)
+        currentArg = varargin{vargIdx};
+        if isstruct(currentArg)
+            if isfield(currentArg, 'silent')
+                silent_mode = currentArg.silent;
+            end
+            if isfield(currentArg, 'original_channel_threshold')
+                original_channel_threshold = currentArg.original_channel_threshold;
+                num_channels_rejected = currentArg.num_channels_rejected;
+                total_original_channels = currentArg.total_original_channels;
+            end
+        end
+    end
+end
+
 if nargin < 10 || isempty(signal_type)
     signal_type = 'eeg';
+end
+
+if strcmp(signal_type, 'eeg')
+    if ~ischar(ref_matrix_type)
+        internal_reference = 'AvgRef';
+    elseif strcmpi(output_reference_channel, 'REST')
+        internal_reference = 'REST';
+    else
+        internal_reference = 'AvgRef';
+    end
+else
+    internal_reference = 'None';
 end
 if nargin < 11 || isempty(smoothing_window_seconds)
     smoothing_window_seconds = Inf; % default: use whole file (no sliding window)
@@ -212,7 +246,7 @@ if ENOVA_threshold_per_channel < inf
     
     % Run GEDAI with channel rejection disabled (inf) to identify bad channels
     % Also disable epoch rejection in pass 1 so channel variance isn't computed on incomplete data
-    [~, ~, ~, ~, ~, mean_ENOVA_p1, ENOVA_per_epoch_p1, ~, ~, ENOVA_per_channel_val_p1] = GEDAI(EEG_p1, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_p1, parallel, false, inf, inf, signal_type, smoothing_window_seconds, output_reference_channel);
+    [~, ~, ~, ~, ~, mean_ENOVA_p1, ENOVA_per_epoch_p1, ~, ~, ENOVA_per_channel_val_p1] = GEDAI(EEG_p1, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_p1, parallel, false, inf, inf, signal_type, smoothing_window_seconds, output_reference_channel, struct('silent', true));
     
     clear EEGclean_p1 EEGartifacts_p1; % Free memory
     
@@ -252,7 +286,8 @@ if ENOVA_threshold_per_channel < inf
         % --- PASS 2 ---
         disp([newline '--- PASS 2: Processing reduced data with global epoch thresholds ---']);
         [EEGclean, EEGartifacts, SENSAI_score, SENSAI_score_per_band, artifact_threshold_per_band, mean_ENOVA, ENOVA_per_epoch, com, ENOVA_per_band] = ...
-            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, smoothing_window_seconds, output_reference_channel, ENOVA_per_epoch_p1);
+            GEDAI(EEG_reduced, artifact_threshold_type, epoch_size_in_cycles, lowcut_frequency, ref_matrix_type_reduced, parallel, false, ENOVA_threshold_per_epoch, inf, signal_type, smoothing_window_seconds, output_reference_channel, ENOVA_per_epoch_p1, ...
+            struct('original_channel_threshold', original_channel_threshold, 'num_channels_rejected', length(channels_to_remove), 'total_original_channels', size(EEGin.data, 1)));
         
         % --- INTERPOLATION ---
         disp([newline '--- INTERPOLATING BAD CHANNELS ---']);
@@ -359,16 +394,6 @@ if ENOVA_threshold_per_channel < inf
         EEGclean.etc.GEDAI.ENOVA_per_channel = ENOVA_per_channel_val;
         EEGclean.etc.GEDAI.bad_channels_removed = channels_to_remove;
         EEGclean.etc.GEDAI.mean_ENOVA = mean_ENOVA;
-        
-        disp([newline '==================================================']);
-        disp('GEDAI BAD-CHANNEL REJECTION MODE: Final Global Statistics');
-        disp('==================================================');
-        disp(['Global SENSAI Score: ' num2str(round(SENSAI_score, 1)) ' %']);
-        disp(['Global Mean ENOVA: ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
-        disp(['Bad channels rejected: ' num2str(length(channels_to_remove)) ' (' num2str(round(length(channels_to_remove)/size(EEGin.data,1)*100, 1)) ' %)']);
-        if isfield(EEGclean.etc, 'GEDAI') && isfield(EEGclean.etc.GEDAI, 'epochs_rejected')
-            disp(['Bad epochs rejected: ' num2str(round(EEGclean.etc.GEDAI.percentage_rejected, 1)) ' % (' num2str(EEGclean.etc.GEDAI.epochs_rejected) ' out of ' num2str(EEGclean.etc.GEDAI.total_epochs) ' epochs)']);
-        end
         
         ENOVA_per_channel = ENOVA_per_channel_val; % Provide output variable
         
@@ -1151,36 +1176,54 @@ for i = 1:length(ENOVA_per_band)
     enova_str_cell{i} = [num2str(round(ENOVA_per_band(i) * 100), '%.0f') ' %'];
 end
 
-% Determine column widths
-max_freq_width = max(cellfun(@length, freq_str_cell));
-col1_width = max(length(header1), max_freq_width) + 2; % Add padding
-max_epoch_width = max(cellfun(@length, epoch_str_cell));
-col2_width = max(length(header2), max_epoch_width) + 2; % Add padding
-max_enova_width = max(cellfun(@length, enova_str_cell));
-col3_width = max(length(header3), max_enova_width) + 2; % Add padding
+if ~silent_mode
+    % Determine column widths
+    max_freq_width = max(cellfun(@length, freq_str_cell));
+    col1_width = max(length(header1), max_freq_width) + 2; % Add padding
+    max_epoch_width = max(cellfun(@length, epoch_str_cell));
+    col2_width = max(length(header2), max_epoch_width) + 2; % Add padding
+    max_enova_width = max(cellfun(@length, enova_str_cell));
+    col3_width = max(length(header3), max_enova_width) + 2; % Add padding
 
-% Centering helper function
-center_text = @(str, width) [repmat(' ', 1, floor((width-length(str))/2)), str, repmat(' ', 1, ceil((width-length(str))/2))];
+    % Centering helper function
+    center_text = @(str, width) [repmat(' ', 1, floor((width-length(str))/2)), str, repmat(' ', 1, ceil((width-length(str))/2))];
 
-fprintf('%s%s | %s | %s\n', left_margin, center_text(header1, col1_width), center_text(header2, col2_width), center_text(header3, col3_width));
-fprintf('%s%s-|-%s-|-%s\n', left_margin, repmat('-', 1, col1_width), repmat('-', 1, col2_width), repmat('-', 1, col3_width));
+    fprintf('%s%s | %s | %s\n', left_margin, center_text(header1, col1_width), center_text(header2, col2_width), center_text(header3, col3_width));
+    fprintf('%s%s-|-%s-|-%s\n', left_margin, repmat('-', 1, col1_width), repmat('-', 1, col2_width), repmat('-', 1, col3_width));
 
-for i = 1:length(freq_str_cell)
-    fprintf('%s%s | %s | %s\n', left_margin, center_text(freq_str_cell{i}, col1_width), center_text(epoch_str_cell{i}, col2_width), center_text(enova_str_cell{i}, col3_width));
+    for i = 1:length(freq_str_cell)
+        fprintf('%s%s | %s | %s\n', left_margin, center_text(freq_str_cell{i}, col1_width), center_text(epoch_str_cell{i}, col2_width), center_text(enova_str_cell{i}, col3_width));
+    end
+    disp(' ');
+
+    disp([newline 'SENSAI score: ' num2str(round(SENSAI_score, 2, 'significant'))]);
+    disp(['Mean ENOVA: ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
+    if ENOVA_threshold_per_epoch < inf
+        disp(['Bad epochs rejected: ' num2str(round(percentage_rejected,1)) ' % (' num2str(num_rejected) ' out of ' num2str(original_total_epochs) ' epochs)']);
+    else
+        num_bad_epochs_detected = sum(ENOVA_per_epoch > 0.95);
+        pct_bad_epochs_detected = 100 * num_bad_epochs_detected / length(ENOVA_per_epoch);
+        disp(['Bad epochs detected: ' num2str(round(pct_bad_epochs_detected, 1)) ' % (' num2str(num_bad_epochs_detected) ' out of ' num2str(length(ENOVA_per_epoch)) ' epochs)']);
+    end
+
+    if original_channel_threshold < inf
+        pct_bad_rejected = 100 * num_channels_rejected / total_original_channels;
+        disp(['Bad channels rejected: ' num2str(round(pct_bad_rejected, 1)) ' % (' num2str(num_channels_rejected) ' out ' num2str(total_original_channels) ' channels)']);
+    else
+        num_bad_detected = sum(ENOVA_per_channel > 0.95);
+        pct_bad_detected = 100 * num_bad_detected / length(ENOVA_per_channel);
+        disp(['Bad channels detected: ' num2str(round(pct_bad_detected, 1)) ' % (' num2str(num_bad_detected) ' out ' num2str(length(ENOVA_per_channel)) ' channels)']);
+    end
+
+    disp(['Elapsed time: ' num2str(round(tEnd, 2, 'significant')) ' seconds' newline]);
+
+    if smoothing_window_seconds ~= Inf
+        disp('Note: Threshold successfully adapted to non-stationarities over time.');
+    end
+    disp(' ');
 end
-disp(' ');
 
-disp([newline 'SENSAI score: ' num2str(round(SENSAI_score, 2, 'significant'))]);
-disp(['Mean ENOVA: ' num2str(round(mean_ENOVA*100, 2, 'significant')) ' %']);
-disp(['Bad epochs rejected: ' num2str(round(percentage_rejected,1)) ' % (' num2str(num_rejected) ' out of ' num2str(original_total_epochs) ' epochs)']);
-disp(['Elapsed time: ' num2str(round(tEnd, 2, 'significant')) ' seconds' newline]);
-
-if smoothing_window_seconds ~= Inf
-    disp('Note: Threshold successfully adapted to non-stationarities over time.');
-
-disp(' ');
-
-if visualize_artifacts
+if visualize_artifacts && ~silent_mode
     plot_title = ['GEDAI Sliding Thresholds (' artifact_threshold_type ' | Window: ' num2str(smoothing_window_seconds) ' s | SENSAI: ' num2str(round(SENSAI_score, 1)) '%)'];
     figure('Color', 'w', 'Name', plot_title);
     num_plots = length(artifact_threshold_array_per_band);
@@ -1220,7 +1263,6 @@ if visualize_artifacts
         % Fixed y-axis scale across all bands for easy comparison
         ylim([-1.9, 10]);
     end
-end
 end
 
 % Store GEDAI variables in EEG.etc.GEDAI
