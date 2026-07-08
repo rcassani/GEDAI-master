@@ -183,8 +183,16 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 % Use in_fread with the correct Brainstorm API.
                 disp(['GEDAI> Reading raw file: ' sInput.FileName]);
                 sFile = FileMat.F;
+                % Force reading clean data: Apply CTF compensators and apply Projectors
+                ImportOptions = db_template('ImportOptions');
+                ImportOptions.ImportMode      = 'Time';
+                ImportOptions.UseCtfComp      = 1;
+                ImportOptions.UseSsp          = 1;
+                ImportOptions.EventsMode      = 'ignore';
+                ImportOptions.DisplayMessages = 0;
+                ImportOptions.RemoveBaseline  = 'no';
                 % Read all channels all samples, epoch 1
-                [DataMatrix, TimeVector] = in_fread(sFile, ChannelMat, 1, []);
+                [DataMatrix, TimeVector] = in_fread(sFile, ChannelMat, 1, [], [], ImportOptions);
                 sInput.A          = DataMatrix;
                 sInput.TimeVector = TimeVector;
                 if isfield(sFile, 'channelflag'), channelFlag = sFile.channelflag; end
