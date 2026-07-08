@@ -170,18 +170,16 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
             % =========================================================
             % Load the BST file structure (works for both raw links and imported data)
             FileMat = in_bst_data(sInput.FileName);
-
             isRaw = strcmpi(FileMat.DataType, 'raw');
+            % Get channel file
+            [sChannel, iStudyChannel] = bst_get('ChannelForStudy', sInput.iStudy);
+            ChannelMat = in_bst_channel(sChannel.FileName);
 
             if isRaw
                 % For raw links, FileMat.F is the sFile descriptor struct.
                 % Use in_fread with the correct Brainstorm API.
                 disp(['GEDAI> Reading raw file: ' sInput.FileName]);
                 sFile = FileMat.F;
-
-                % Get channel file FIRST (required by in_fread)
-                [sChannel, iStudyChannel] = bst_get('ChannelForStudy', sInput.iStudy);
-                ChannelMat = in_bst_channel(sChannel.FileName);
 
                 % Compute sample bounds from sFile.prop.times (seconds) — 0-indexed integers
                 SamplesBounds = round(sFile.prop.times * sFile.prop.sfreq);
@@ -204,10 +202,6 @@ function OutputFiles = Run(sProcess, sInputs) %#ok<DEFNU>
                 if isfield(FileMat, 'History'),     sInput.History     = FileMat.History;     end
                 if isfield(FileMat, 'Events'),      sInput.Events      = FileMat.Events;      end
                 if isfield(FileMat, 'ChannelFlag'), sInput.ChannelFlag = FileMat.ChannelFlag; end
-
-                % Get channel file
-                [sChannel, iStudyChannel] = bst_get('ChannelForStudy', sInput.iStudy);
-                ChannelMat = in_bst_channel(sChannel.FileName);
             end
 
             % =========================================================
