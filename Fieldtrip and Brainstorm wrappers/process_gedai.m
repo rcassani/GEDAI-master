@@ -598,11 +598,3 @@ function OutputFile = SaveAndRegisterData(sInput, GedaiDataType, FileMatOut, Cha
     end
 end
 
-function sOutput = eeglab2brainstorm(EEG, sInput)
-    sOutput = sInput;
-    sOutput.A = EEG.data / 1e6; % µV -> V
-    if length(sOutput.TimeVector) ~= size(EEG.data, 2)
-        sOutput.TimeVector = EEG.times / 1000;
-    end
-    sOutput.Comment = EEG.setname;
-end
